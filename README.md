@@ -118,7 +118,7 @@ You'll need:
   - macOS: `brew install ninja`
   - Linux: `apt-get install ninja-build` or `yum install ninja-build`
 
-**That's it!** The project has **no other dependencies**. The CMake build process automatically downloads and builds Static Hermes on first configure (~5-10 minutes one-time setup).
+**That's it!** The project has **no other dependencies**. The CMake build process automatically downloads and builds Static Hermes on first configure.
 
 ### Quick Start
 
