@@ -265,6 +265,22 @@ void imgui_main(int argc, char *argv[],
 ### Build System (CMake)
 
 **Hermes Build Integration (cmake/HermesExternal.cmake):**
+The build system supports two modes for obtaining Hermes:
+
+**Option 1: Using Pre-built Hermes (Recommended for CI/Shared Builds)**
+```bash
+# Point to an existing Hermes build directory
+cmake -B build -DHERMES_BUILD_DIR=/path/to/hermes-build
+```
+- **Fast Configuration**: Skips git clone and build, uses existing Hermes
+- **Auto-detect Source**: Reads source path from `CMakeCache.txt` in build directory
+- **Validation**: Checks that build directory and shermes binary exist
+- **Use Cases**:
+  - CI caching: Build Hermes once, cache it, reuse across jobs
+  - Local development: Share one Hermes build across multiple projects
+  - Faster iteration: Skip 5-10 minute Hermes rebuild
+
+**Option 2: Automatic Build (Default)**
 Hermes is automatically cloned and built as part of the CMake build using `ExternalProject_Add`:
 - **Automatic Git Clone**: Hermes is cloned from GitHub at configure time
 - **Configurable Version**: Set via `HERMES_GIT_TAG` (default: specific commit hash)
@@ -274,7 +290,9 @@ Hermes is automatically cloned and built as part of the CMake build using `Exter
 - **Per-Config Isolation**: Each build configuration gets its own Hermes clone
   - Debug: `cmake-build-debug/hermes-src/` (source) + `cmake-build-debug/hermes/` (build)
   - Release: `cmake-build-release/hermes-src/` (source) + `cmake-build-release/hermes/` (build)
-- **No Manual Setup**: Users don't need to manually build or specify HERMES_BUILD/HERMES_SRC paths
+- **No Manual Setup**: Users don't need to manually build or specify paths
+
+**Build Configuration:**
 - **Static vs Shared Linking**:
   - Release builds: Link statically against `hermesvm_a`, `jsi`, and `boost_context` for optimal performance
   - Debug builds: Link dynamically against `hermesvm` shared library for faster build times
@@ -532,6 +550,36 @@ cmake --build cmake-build-debug
 ```bash
 cmake -B cmake-build-debug -DHERMES_GIT_TAG=<commit-hash>
 cmake --build cmake-build-debug --target hermes-rebuild  # Force rebuild
+```
+
+**Using a pre-built Hermes:**
+```bash
+# Point to an existing Hermes build directory
+cmake -B cmake-build-debug -DCMAKE_BUILD_TYPE=Debug -DHERMES_BUILD_DIR=/path/to/hermes-build
+cmake --build cmake-build-debug
+```
+
+**CI Workflow with Hermes Caching:**
+```yaml
+# Build Hermes once in a separate job, cache it, and reuse
+- name: Cache Hermes build
+  id: hermes-cache
+  uses: actions/cache@v4
+  with:
+    path: hermes-build
+    key: ${{ runner.os }}-hermes-${{ hashFiles('.github/hermes-version.txt') }}
+
+- name: Build Hermes (if not cached)
+  if: steps.hermes-cache.outputs.cache-hit != 'true'
+  run: |
+    git clone https://github.com/facebook/hermes.git hermes-src
+    cmake -S hermes-src -B hermes-build -DCMAKE_BUILD_TYPE=Release
+    cmake --build hermes-build --config Release
+
+- name: Build project with cached Hermes
+  run: |
+    cmake -B build -DCMAKE_BUILD_TYPE=Debug -DHERMES_BUILD_DIR=${{ github.workspace }}/hermes-build
+    cmake --build build
 ```
 
 **Important:**
