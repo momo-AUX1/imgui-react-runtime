@@ -23,6 +23,26 @@ When implementing changes:
 
 Never commit code immediately after implementation. The user must review and test first.
 
+**⚠️ COMMIT MESSAGE STYLE**
+
+Write commit messages that are factual and technical:
+- State what was changed, not how you feel about it
+- Use objective language without emotion, opinions, or exaggeration
+- Avoid words like "awesome", "amazing", "great", "excellent", "beautiful"
+- Be concise and descriptive
+- Focus on the technical change and its purpose
+- Wrap lines at 72 characters
+
+Good examples:
+- "Add ICU library linking for Linux compatibility"
+- "Fix case-sensitive filesystem issue in Hermes includes"
+- "Pass compiler settings to Hermes external project"
+
+Bad examples:
+- "Amazing fix for the awesome Linux build!"
+- "Greatly improve the build system"
+- "Make things work better"
+
 ## Project Overview
 
 This project implements a custom React reconciler that renders to DearImGUI using Static Hermes. The goal is to use React's declarative component model and JSX syntax to describe ImGUI interfaces, while learning how React works internally.

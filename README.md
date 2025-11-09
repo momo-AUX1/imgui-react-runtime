@@ -97,16 +97,16 @@ This project uses typed mode for the ImGui FFI layer (`lib/imgui-unit/`) and unt
 ### Supported Platforms
 
 - **macOS** ✅ Fully tested and supported
-- **Linux** 🔨 Expected to work with minimal changes (untested)
+- **Linux** ✅ Tested on Ubuntu 24.04.3 LTS
 - **Windows** ⏳ Coming soon (waiting for Static Hermes Windows support)
 
 ### Build Requirements
 
 You'll need:
 
-- **Node.js and npm** - For esbuild bundler and React dependencies
+- **Node.js and npm** (Node 20 or later recommended) - For esbuild bundler and React dependencies
   - macOS: `brew install node` or download from [nodejs.org](https://nodejs.org/)
-  - Linux: `apt-get install nodejs npm` or `yum install nodejs npm`
+  - Linux: `snap install node --classic` (recommended) or `apt-get install nodejs npm`
 - **C++ Compiler**
   - **Clang** (recommended) - Officially supported by Static Hermes
   - GCC also works but Clang is the tested configuration
@@ -118,6 +118,9 @@ You'll need:
 - **Ninja** - Fast build system
   - macOS: `brew install ninja`
   - Linux: `apt-get install ninja-build` or `yum install ninja-build`
+- **Graphics libraries** - Required for Sokol (window management and OpenGL rendering)
+  - macOS: (no additional packages needed)
+  - Linux: `apt-get install libx11-dev libxi-dev libxcursor-dev libgl1-mesa-dev libicu-dev`
 
 **That's it!** The project has **no other dependencies**. The CMake build process automatically downloads and builds Static Hermes on first configure.
 
@@ -132,7 +135,12 @@ cd imgui-react-runtime
 npm install
 
 # Configure (downloads and builds Hermes automatically on first run)
-cmake -B cmake-build-debug -DCMAKE_BUILD_TYPE=Debug -G Ninja
+# On Linux, explicitly specify Clang as the compiler:
+cmake -B cmake-build-debug -DCMAKE_BUILD_TYPE=Debug -G Ninja \
+  -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+
+# On macOS, Clang is the default, so just:
+# cmake -B cmake-build-debug -DCMAKE_BUILD_TYPE=Debug -G Ninja
 
 # Build all examples
 cmake --build cmake-build-debug

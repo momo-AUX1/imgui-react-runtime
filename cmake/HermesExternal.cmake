@@ -87,6 +87,8 @@ else()
         -DCMAKE_BUILD_TYPE=Release
         -DHERMES_ENABLE_TEST_SUITE=OFF
         -DHERMES_BUILD_APPLE_FRAMEWORK=OFF
+        -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+        -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
     )
 
     # Add Hermes as external project
