@@ -1,8 +1,11 @@
 {
-  "name": "guireact",
+  "name": "react-imgui",
   "version": "1.0.0",
-  "description": "",
+  "description": "React runtime for Dear ImGui powered by Static Hermes",
   "main": "index.js",
+  "bin": {
+    "react-imgui": "./bin/react-imgui.js"
+  },
   "directories": {
     "doc": "doc"
   },
@@ -10,13 +13,13 @@
     "format": "prettier --write \"app/**/*.js\" \"app/**/*.jsx\"",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
+  "keywords": ["react", "imgui", "gui", "hermes", "static-hermes"],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "type": "module",
   "dependencies": {
-    "react": "19.2.0",
-    "react-reconciler": "0.33.0"
+    "react": "18.2.0",
+    "react-reconciler": "0.29.0"
   },
   "devDependencies": {
     "@babel/cli": "^7.28.3",

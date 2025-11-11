@@ -31,6 +31,10 @@ _**Note**: This project is an independent experiment and is not affiliated with,
   - [Supported Platforms](#supported-platforms)
   - [Build Requirements](#build-requirements)
   - [Quick Start](#quick-start)
+- [CLI Tools](#cli-tools)
+  - [Installation](#installation)
+  - [Creating Projects](#creating-projects)
+  - [Running Projects](#running-projects)
 - [Examples](#examples)
   - [Hello World](#hello-world)
   - [Showcase](#showcase)
@@ -150,6 +154,66 @@ cmake --build cmake-build-debug
 ```
 
 You should see the showcase window with multiple demos, background decorations, and interactive controls!
+
+## CLI Tools
+
+The `react-imgui` CLI provides convenient commands for creating and running React + ImGui projects.
+
+### Installation
+
+Install globally to use the `react-imgui` command from anywhere:
+
+```bash
+npm install -g .
+```
+
+Or use `npm link` during development:
+
+```bash
+npm link
+```
+
+### Creating Projects
+
+Create a new React + ImGui project with a single command:
+
+```bash
+react-imgui create my-app
+```
+
+This generates a ready-to-run project with:
+- `app.jsx` - Main React component with a simple example
+- `index.js` - Application entry point
+- `my-app.cpp` - C++ entry point
+- `CMakeLists.txt` - Build configuration
+- `package.json` - Node.js dependencies
+
+After creation:
+
+```bash
+cd my-app
+npm install
+react-imgui run
+```
+
+### Running Projects
+
+Build and run your project in debug mode:
+
+```bash
+react-imgui run
+```
+
+Or specify a project directory:
+
+```bash
+react-imgui run ./my-app
+```
+
+The `run` command will:
+1. Configure CMake (if not already configured)
+2. Build the project in debug mode using Ninja
+3. Run the executable
 
 ## Examples
 

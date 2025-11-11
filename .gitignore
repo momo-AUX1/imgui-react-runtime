@@ -7,3 +7,4 @@ bundle/
 cmake-build-*/
 .claude/
 .idea/
+test/

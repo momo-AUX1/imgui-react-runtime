@@ -6,17 +6,9 @@
 
 #include "MappedFileBuffer.h"
 
-struct InternalImage {
-  const char unsigned *data;
-  unsigned size;
-  const char *name;
-};
-
-#define IMPORT_IMAGE(name)                                                     \
-  extern "C" const unsigned char img_##name##_png[];                           \
-  extern "C" const unsigned img_##name##_png_size;                             \
-  static InternalImage s_img_##name = {img_##name##_png,                       \
-                                       img_##name##_png_size, #name}
+void imgui_register_embedded_image(const char *name,
+                                    const unsigned char *data,
+                                    unsigned size);
 
 /// Main function provided by the user. It has to initialize the React and user
 /// code.

@@ -66,7 +66,7 @@ function(hermes_compile_native)
         set(ARG_WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
     endif()
     if(NOT ARG_COMMENT)
-        set(ARG_COMMENT "Compiling ${ARG_UNIT_NAME} unit with shermes")
+    set(ARG_COMMENT "Compiling ${ARG_UNIT_NAME} unit with shermes")
     endif()
 
     # Build compiler flags
@@ -86,7 +86,23 @@ function(hermes_compile_native)
     # Add output
     list(APPEND COMPILER_FLAGS -o ${ARG_OUTPUT})
 
-    # Create custom command
+  # On Apple platforms ensure the correct SDK is available so that standard
+  # headers like <assert.h> resolve when shermes invokes clang.
+  if(APPLE)
+    if(NOT DEFINED HERMES_APPLE_SYSROOT)
+      execute_process(
+        COMMAND xcrun --sdk macosx --show-sdk-path
+        OUTPUT_VARIABLE HERMES_APPLE_SYSROOT
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+      )
+    endif()
+    if(HERMES_APPLE_SYSROOT)
+      list(APPEND COMPILER_FLAGS -Wc,-isysroot -Wc,${HERMES_APPLE_SYSROOT})
+    endif()
+  endif()
+
+  # Create custom command
     add_custom_command(
         OUTPUT ${ARG_OUTPUT}
         COMMAND ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER} ${SHERMES} ${COMPILER_FLAGS}

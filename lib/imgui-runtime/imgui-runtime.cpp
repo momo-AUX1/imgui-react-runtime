@@ -20,6 +20,10 @@
 
 #include <cmath>
 #include <climits>
+#include <filesystem>
+#include <string>
+#include <string_view>
+#include <unordered_map>
 #include <vector>
 
 // Hermes runtime and event loop management
@@ -46,7 +50,62 @@ static HermesApp *s_hermesApp = nullptr;
 
 static sg_sampler s_sampler = {};
 
-std::array<InternalImage *, 0> s_internalImages;
+namespace {
+
+struct EmbeddedImage {
+  const unsigned char *data;
+  unsigned size;
+};
+
+static std::unordered_map<std::string, EmbeddedImage> &embedded_images() {
+  static std::unordered_map<std::string, EmbeddedImage> images;
+  return images;
+}
+
+const EmbeddedImage *find_embedded_image(std::string_view key) {
+  if (key.empty()) {
+    return nullptr;
+  }
+
+  auto &images = embedded_images();
+
+  const auto direct = images.find(std::string(key));
+  if (direct != images.end()) {
+    return &direct->second;
+  }
+
+  // Strip leading "./" which is common in JS configuration strings.
+  if (key.size() > 2 && key[0] == '.' && (key[1] == '/' || key[1] == '\\')) {
+    const auto withoutDot = images.find(std::string(key.substr(2)));
+    if (withoutDot != images.end()) {
+      return &withoutDot->second;
+    }
+  }
+
+  // Try matching by filename component only.
+  std::filesystem::path asPath{std::string(key)};
+  auto filename = asPath.filename().string();
+  if (!filename.empty()) {
+    const auto byName = images.find(filename);
+    if (byName != images.end()) {
+      return &byName->second;
+    }
+  }
+
+  return nullptr;
+}
+
+} // namespace
+
+  void imgui_register_embedded_image(const char *name,
+                                     const unsigned char *data,
+                                     unsigned size) {
+    if (!name || !*name || !data || size == 0) {
+      return;
+    }
+
+    embedded_images()[std::string(name)] = EmbeddedImage{data, size};
+  }
 
 class Image {
 public:
@@ -55,21 +114,13 @@ public:
   simgui_image_t simguiImage_ = {};
 
   explicit Image(const char *path) {
-    const unsigned char *buf = nullptr;
-    unsigned size = 0;
-
-    for (auto img : s_internalImages) {
-      if (strcmp(img->name, path) == 0) {
-        buf = img->data;
-        size = img->size;
-        break;
-      }
-    }
+    const EmbeddedImage *embedded = find_embedded_image(path ? path : "");
 
     unsigned char *data;
     int n;
-    if (buf) {
-      data = stbi_load_from_memory(buf, size, &w_, &h_, &n, 4);
+    if (embedded) {
+      data = stbi_load_from_memory(embedded->data, embedded->size, &w_, &h_,
+                                   &n, 4);
     } else {
       data = stbi_load(path, &w_, &h_, &n, 4);
     }
@@ -110,6 +161,93 @@ static double s_imgui_avg_ms = 0;              // ImGui render average (EMA, acc
 static double s_react_avg_ms_display = 0;      // React avg (displayed, updated once/sec)
 static double s_react_max_ms_display = 0;      // React max (displayed, updated once/sec)
 static double s_imgui_avg_ms_display = 0;      // ImGui render average (displayed, updated once/sec)
+
+static std::vector<uint8_t> s_windowIconPixels{};
+
+#if !defined(NDEBUG) && REACT_BUNDLE_MODE == 2
+static std::filesystem::file_time_type s_bundleTimestamp{};
+static bool s_bundleWatchEnabled = false;
+static bool s_bundleReloadPending = false;
+static int s_bundleCooldownFrames = 0;
+#endif
+
+#if !defined(NDEBUG) && REACT_BUNDLE_MODE == 2
+static void initialize_bundle_watch() {
+  std::error_code ec;
+  auto timestamp = std::filesystem::last_write_time(REACT_BUNDLE_PATH, ec);
+  if (!ec) {
+    s_bundleTimestamp = timestamp;
+    s_bundleWatchEnabled = true;
+    printf("Hot reload watching: '%s'\n", REACT_BUNDLE_PATH);
+  } else {
+    printf("Hot reload disabled: %s\n", ec.message().c_str());
+  }
+}
+
+static bool reload_react_bundle() {
+  if (!s_hermesApp || !s_hermesApp->hermes) {
+    return false;
+  }
+
+  printf("Reloading React bundle...\n");
+  try {
+    imgui_load_unit(s_hermesApp->hermes, nullptr, false, REACT_BUNDLE_PATH,
+                    "react-unit-bundle.js");
+    s_hermesApp->hermes->drainMicrotasks();
+
+    auto global = s_hermesApp->hermes->global();
+    if (global.hasProperty(*s_hermesApp->hermes, "reactApp")) {
+      auto appObj = global.getPropertyAsObject(*s_hermesApp->hermes, "reactApp");
+      if (appObj.hasProperty(*s_hermesApp->hermes, "render")) {
+        appObj.getPropertyAsFunction(*s_hermesApp->hermes, "render")
+            .call(*s_hermesApp->hermes);
+      }
+    }
+
+    printf("React bundle hot reload complete.\n");
+    return true;
+  } catch (facebook::jsi::JSIException &e) {
+    slog_func("ERROR", 1, 0, e.what(), __LINE__, __FILE__, nullptr);
+  } catch (const std::exception &e) {
+    slog_func("ERROR", 1, 0, e.what(), __LINE__, __FILE__, nullptr);
+  }
+
+  return false;
+}
+
+static void maybe_handle_hot_reload() {
+  if (!s_bundleWatchEnabled) {
+    return;
+  }
+
+  std::error_code ec;
+  auto currentTime =
+      std::filesystem::last_write_time(REACT_BUNDLE_PATH, ec);
+  if (!ec && currentTime != s_bundleTimestamp && !s_bundleReloadPending) {
+    s_bundleTimestamp = currentTime;
+    s_bundleReloadPending = true;
+    s_bundleCooldownFrames = 2; // Wait a couple frames for write to finish
+    printf("Detected bundle change. Scheduling hot reload...\n");
+  }
+
+  if (!s_bundleReloadPending) {
+    return;
+  }
+
+  if (s_bundleCooldownFrames > 0) {
+    --s_bundleCooldownFrames;
+    return;
+  }
+
+  if (reload_react_bundle()) {
+    s_bundleReloadPending = false;
+  } else {
+    s_bundleCooldownFrames = 2;
+  }
+}
+#else
+static void maybe_handle_hot_reload() {}
+#endif
 
 
 extern "C" int load_image(const char *path) {
@@ -232,6 +370,8 @@ static void update_performance_metrics() {
 static void app_frame() {
   uint64_t now = stm_now();
   double curTimeMs = stm_ms(now);
+
+  maybe_handle_hot_reload();
 
   if (!s_started) {
     s_started = true;
@@ -390,6 +530,65 @@ static void populate_sapp_desc_from_config(facebook::hermes::HermesRuntime *herm
     READ_BOOL_PROP("enable_clipboard", enable_clipboard);
     READ_BOOL_PROP("enable_dragndrop", enable_dragndrop);
 
+    // Load window icon if provided
+    if (config.hasProperty(*hermes, "iconPath")) {
+      auto iconValue = config.getProperty(*hermes, "iconPath");
+      if (iconValue.isString()) {
+        auto iconStr = iconValue.asString(*hermes).utf8(*hermes);
+
+        const EmbeddedImage *embedded = find_embedded_image(iconStr);
+        int width = 0;
+        int height = 0;
+        int comp = 0;
+        stbi_uc *pixels = nullptr;
+        std::string iconPathStr = iconStr;
+
+        if (embedded) {
+          pixels = stbi_load_from_memory(embedded->data, embedded->size, &width,
+                                         &height, &comp, 4);
+        }
+
+        if (!pixels) {
+          try {
+            std::filesystem::path iconPath = iconStr;
+            if (!iconPath.is_absolute()) {
+              iconPath = std::filesystem::current_path() / iconPath;
+            }
+            iconPath = std::filesystem::weakly_canonical(iconPath);
+            iconPathStr = iconPath.string();
+
+            if (!embedded) {
+              embedded = find_embedded_image(iconPathStr);
+              if (embedded) {
+                pixels = stbi_load_from_memory(embedded->data, embedded->size,
+                                               &width, &height, &comp, 4);
+              }
+            }
+
+            if (!pixels) {
+              pixels = stbi_load(iconPathStr.c_str(), &width, &height, &comp, 4);
+            }
+          } catch (const std::exception &e) {
+            slog_func("ERROR", 1, 0, e.what(), __LINE__, __FILE__, nullptr);
+          }
+        }
+
+        if (pixels) {
+          s_windowIconPixels.assign(pixels, pixels + (width * height * 4));
+          stbi_image_free(pixels);
+
+          desc.icon = {};
+          desc.icon.images[0].width = width;
+          desc.icon.images[0].height = height;
+          desc.icon.images[0].pixels.ptr = s_windowIconPixels.data();
+          desc.icon.images[0].pixels.size = s_windowIconPixels.size();
+        } else {
+          std::string message = "Failed to load icon: " + iconPathStr;
+          slog_func("ERROR", 1, 0, message.c_str(), __LINE__, __FILE__, nullptr);
+        }
+      }
+    }
+
 #undef READ_INT_PROP
 #undef READ_BOOL_PROP
   }
@@ -468,6 +667,10 @@ sapp_desc sokol_main(int argc, char *argv[]) {
 
     // Populate sapp_desc from globalThis.sappConfig
     populate_sapp_desc_from_config(hermes);
+
+#if !defined(NDEBUG) && REACT_BUNDLE_MODE == 2
+  initialize_bundle_watch();
+#endif
 
     if (!s_app_desc.init_cb)
       throw facebook::jsi::JSINativeException(

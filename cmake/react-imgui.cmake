@@ -80,12 +80,21 @@ function(add_react_imgui_app)
         message(FATAL_ERROR "node_modules/ directory not found. Please run 'npm install' in the project root before building.")
     endif()
 
+    # Determine the runtime source directory
+    # If IMGUI_REACT_RUNTIME_SOURCE_DIR is set (external projects), use it
+    # Otherwise, assume we're in the imgui-react-runtime project itself
+    if(DEFINED IMGUI_REACT_RUNTIME_SOURCE_DIR)
+        set(RUNTIME_SOURCE_DIR ${IMGUI_REACT_RUNTIME_SOURCE_DIR})
+    else()
+        set(RUNTIME_SOURCE_DIR ${CMAKE_SOURCE_DIR})
+    endif()
+
     # Build dependency list
     set(REACT_UNIT_DEPS
         ${RECONCILER_FILES}
         ${APP_FILES}
-        ${CMAKE_SOURCE_DIR}/scripts/bundle-react-unit.js
-        ${CMAKE_SOURCE_DIR}/.babelrc.cjs
+        ${RUNTIME_SOURCE_DIR}/scripts/bundle-react-unit.js
+        ${RUNTIME_SOURCE_DIR}/.babelrc.cjs
     )
     if(ARG_ADDITIONAL_JS_DEPS)
         list(APPEND REACT_UNIT_DEPS ${ARG_ADDITIONAL_JS_DEPS})
@@ -95,7 +104,7 @@ function(add_react_imgui_app)
     add_custom_command(OUTPUT ${REACT_UNIT_BUNDLE}
         COMMAND ${CMAKE_COMMAND} -E env
             USE_REACT_COMPILER=$<IF:$<BOOL:${USE_REACT_COMPILER}>,true,false>
-            node ${CMAKE_SOURCE_DIR}/scripts/bundle-react-unit.js
+            node ${RUNTIME_SOURCE_DIR}/scripts/bundle-react-unit.js
             ${ARG_ENTRY_POINT}
             ${REACT_UNIT_BUNDLE}
             $<IF:$<CONFIG:Debug>,development,production>

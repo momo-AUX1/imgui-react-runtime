@@ -4,7 +4,7 @@
 // See LICENSE file for full license text
 
 import * as esbuild from 'esbuild';
-import { mkdirSync, rmSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'fs';
 import { dirname, resolve, join, relative } from 'path';
 import { fileURLToPath } from 'url';
 import { transformAsync } from '@babel/core';
@@ -17,6 +17,17 @@ const useReactCompiler = process.env.USE_REACT_COMPILER === 'true';
 const entryPoint = process.argv[2];
 const outfile = process.argv[3];
 const nodeEnv = process.argv[4] || 'production';
+const extraArgs = process.argv.slice(5);
+
+let watchMode = false;
+for (const arg of extraArgs) {
+  if (arg === '--watch') {
+    watchMode = true;
+  } else {
+    console.error(`Unknown option: ${arg}`);
+    process.exit(1);
+  }
+}
 
 if (!entryPoint || !outfile) {
   console.error('Usage: bundle-react-unit.js <entry-point> <output-file> [node-env]');
@@ -38,8 +49,68 @@ mkdirSync(dirname(outfile), { recursive: true });
 const absEntryPoint = resolve(entryPoint);
 let actualEntryPoint = absEntryPoint;
 
+function findPackageRoot(startDir) {
+  let current = startDir;
+
+  while (true) {
+    if (existsSync(join(current, 'package.json'))) {
+      return current;
+    }
+
+    const parent = dirname(current);
+    if (parent === current) {
+      break;
+    }
+
+    current = parent;
+  }
+
+  return null;
+}
+
+const entryDir = dirname(absEntryPoint);
+const projectPackageRoot = findPackageRoot(entryDir);
+
+// Force all consumers (app + reconciler) to resolve React from the same install
+// so we don't end up with two React copies bundled (which breaks hooks).
+const alias = {
+  'react-imgui-reconciler': libDir,
+};
+
+const reactAliasRoots = [];
+if (projectPackageRoot) {
+  reactAliasRoots.push(projectPackageRoot);
+}
+reactAliasRoots.push(projectRoot);
+
+for (const rootCandidate of reactAliasRoots) {
+  const reactDir = join(rootCandidate, 'node_modules', 'react');
+  if (!existsSync(reactDir)) {
+    continue;
+  }
+
+  const reactEntry = join(reactDir, 'index.js');
+  alias.react = reactEntry;
+
+  const jsxRuntimePath = join(reactDir, 'jsx-runtime.js');
+  if (existsSync(jsxRuntimePath)) {
+    alias['react/jsx-runtime'] = jsxRuntimePath;
+  }
+
+  const jsxDevRuntimePath = join(reactDir, 'jsx-dev-runtime.js');
+  if (existsSync(jsxDevRuntimePath)) {
+    alias['react/jsx-dev-runtime'] = jsxDevRuntimePath;
+  }
+
+  break;
+}
+
 // If React Compiler is enabled, preprocess with Babel
 if (useReactCompiler) {
+  if (watchMode) {
+    console.error('React Compiler is not supported in watch mode yet.');
+    process.exit(1);
+  }
   console.log('React Compiler: Preprocessing JSX files...');
 
   const tempDir = join(dirname(outfile), '.babel-temp');
@@ -76,31 +147,70 @@ if (useReactCompiler) {
   console.log('React Compiler: Preprocessing complete');
 }
 
-await esbuild.build({
+const buildOptions = {
   entryPoints: [actualEntryPoint],
   bundle: true,
-  outfile: outfile,
+  outfile,
   platform: 'neutral',
   format: 'iife',
   target: 'esnext',
   minify: false,
   sourcemap: true,
-  // When React Compiler is enabled, entry point is in temp dir,
-  // so we need to ensure module resolution works from project root
+  jsx: 'automatic',
+  jsxImportSource: 'react',
   ...(useReactCompiler ? {
     absWorkingDir: projectRoot,
     nodePaths: [join(projectRoot, 'node_modules')],
   } : {}),
-  // External packages that should be bundled
   external: [],
-  // Alias for clean imports from lib/
   alias: {
-    'react-imgui-reconciler': libDir,
+    ...alias,
   },
-  // Define NODE_ENV for dead code elimination
   define: {
     'process.env.NODE_ENV': JSON.stringify(nodeEnv),
   },
-});
+  logLevel: 'error',
+  plugins: watchMode ? [{
+    name: 'react-imgui-watch-logger',
+    setup(build) {
+      build.onEnd((result) => {
+        if (!watchMode) {
+          return;
+        }
+        if (result.errors && result.errors.length > 0) {
+          console.error('React bundle rebuild failed.');
+          return;
+        }
+        if (result.warnings && result.warnings.length > 0) {
+          for (const warning of result.warnings) {
+            console.warn(warning);
+          }
+        }
+        console.log('React unit bundle updated:', outfile);
+      });
+    },
+  }] : undefined,
+};
 
-console.log('React unit bundle created:', outfile, `(NODE_ENV=${nodeEnv}, React Compiler=${useReactCompiler})`);
+const ctx = await esbuild.context(buildOptions);
+
+try {
+  const result = await ctx.rebuild();
+  if (result.warnings?.length) {
+    for (const warning of result.warnings) {
+      console.warn(warning);
+    }
+  }
+  console.log('React unit bundle created:', outfile, `(NODE_ENV=${nodeEnv}, React Compiler=${useReactCompiler})`);
+
+  if (watchMode) {
+    await ctx.watch();
+    console.log('Watching for React unit changes...');
+    process.stdin.resume();
+  } else {
+    await ctx.dispose();
+  }
+} catch (error) {
+  await ctx.dispose();
+  throw error;
+}

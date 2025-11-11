@@ -7,6 +7,7 @@ add_library(imgui-runtime imgui-runtime.cpp
         MappedFileBuffer.h
         imgui-runtime.h
 )
+target_compile_features(imgui-runtime PUBLIC cxx_std_17)
 target_link_directories(imgui-runtime INTERFACE
     ${HERMES_BUILD}/lib
     ${HERMES_BUILD}/jsi
@@ -18,4 +19,12 @@ target_link_libraries(imgui-runtime
     $<$<CONFIG:Debug>:hermesvm>
     $<$<PLATFORM_ID:Linux>:icuuc icui18n icudata>
 )
-target_include_directories(imgui-runtime INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(imgui-runtime
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${HERMES_BUILD}/lib/config
+        ${HERMES_SRC}/include
+        ${HERMES_SRC}/public
+        ${HERMES_SRC}/API
+        ${HERMES_SRC}/API/jsi
+)
