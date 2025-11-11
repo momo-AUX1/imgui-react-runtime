@@ -164,34 +164,67 @@ static double s_imgui_avg_ms_display = 0;      // ImGui render average (displaye
 
 static std::vector<uint8_t> s_windowIconPixels{};
 
-#if !defined(NDEBUG) && REACT_BUNDLE_MODE == 2
+static int s_bundleMode = 0;
+static std::string s_bundlePath{};
+
+#if !defined(NDEBUG)
 static std::filesystem::file_time_type s_bundleTimestamp{};
 static bool s_bundleWatchEnabled = false;
 static bool s_bundleReloadPending = false;
 static int s_bundleCooldownFrames = 0;
 #endif
 
-#if !defined(NDEBUG) && REACT_BUNDLE_MODE == 2
+void imgui_runtime_set_bundle_info(int bundleMode, const char *bundlePath) {
+  s_bundleMode = bundleMode;
+
+  if (bundlePath && *bundlePath) {
+    std::filesystem::path candidate{bundlePath};
+    std::error_code ec;
+    auto canonical = std::filesystem::weakly_canonical(candidate, ec);
+    if (!ec) {
+      s_bundlePath = canonical.string();
+    } else {
+      s_bundlePath = candidate.string();
+    }
+  } else {
+    s_bundlePath.clear();
+  }
+
+#if !defined(NDEBUG)
+  s_bundleWatchEnabled = false;
+  s_bundleReloadPending = false;
+  s_bundleCooldownFrames = 0;
+#endif
+}
+
+#if !defined(NDEBUG)
 static void initialize_bundle_watch() {
+  if (s_bundleMode != 2 || s_bundlePath.empty()) {
+    return;
+  }
+
   std::error_code ec;
-  auto timestamp = std::filesystem::last_write_time(REACT_BUNDLE_PATH, ec);
+  auto timestamp = std::filesystem::last_write_time(s_bundlePath, ec);
   if (!ec) {
     s_bundleTimestamp = timestamp;
     s_bundleWatchEnabled = true;
-    printf("Hot reload watching: '%s'\n", REACT_BUNDLE_PATH);
+    printf("Hot reload watching: '%s'\n", s_bundlePath.c_str());
   } else {
     printf("Hot reload disabled: %s\n", ec.message().c_str());
   }
 }
 
 static bool reload_react_bundle() {
+  if (s_bundleMode != 2 || s_bundlePath.empty()) {
+    return false;
+  }
   if (!s_hermesApp || !s_hermesApp->hermes) {
     return false;
   }
 
   printf("Reloading React bundle...\n");
   try {
-    imgui_load_unit(s_hermesApp->hermes, nullptr, false, REACT_BUNDLE_PATH,
+    imgui_load_unit(s_hermesApp->hermes, nullptr, false, s_bundlePath.c_str(),
                     "react-unit-bundle.js");
     s_hermesApp->hermes->drainMicrotasks();
 
@@ -216,13 +249,12 @@ static bool reload_react_bundle() {
 }
 
 static void maybe_handle_hot_reload() {
-  if (!s_bundleWatchEnabled) {
+  if (!s_bundleWatchEnabled || s_bundleMode != 2 || s_bundlePath.empty()) {
     return;
   }
 
   std::error_code ec;
-  auto currentTime =
-      std::filesystem::last_write_time(REACT_BUNDLE_PATH, ec);
+  auto currentTime = std::filesystem::last_write_time(s_bundlePath, ec);
   if (!ec && currentTime != s_bundleTimestamp && !s_bundleReloadPending) {
     s_bundleTimestamp = currentTime;
     s_bundleReloadPending = true;
@@ -247,6 +279,7 @@ static void maybe_handle_hot_reload() {
 }
 #else
 static void maybe_handle_hot_reload() {}
+static void initialize_bundle_watch() {}
 #endif
 
 
@@ -604,7 +637,6 @@ extern "C" SHUnit *sh_export_imgui(void);
 sapp_desc sokol_main(int argc, char *argv[]) {
   // Initialize Sokol time before anything else
   stm_setup();
-
   // Enable microtask queue for Promise support
   auto runtimeConfig = ::hermes::vm::RuntimeConfig::Builder()
                            .withMicrotaskQueue(true)
@@ -668,7 +700,7 @@ sapp_desc sokol_main(int argc, char *argv[]) {
     // Populate sapp_desc from globalThis.sappConfig
     populate_sapp_desc_from_config(hermes);
 
-#if !defined(NDEBUG) && REACT_BUNDLE_MODE == 2
+#if !defined(NDEBUG)
   initialize_bundle_watch();
 #endif
 

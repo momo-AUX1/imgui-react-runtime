@@ -113,6 +113,28 @@ function(add_react_imgui_app)
         COMMENT "Bundling ${ARG_TARGET} React unit with esbuild (NODE_ENV=$<IF:$<CONFIG:Debug>,development,production>, React Compiler=${USE_REACT_COMPILER})"
     )
 
+    # Prepare platform-specific assets
+    set(APP_ICON_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/icon.png)
+    set(MACOSX_ICON_FILE "")
+
+    if(APPLE)
+        if(EXISTS "${APP_ICON_SOURCE}")
+            set(MACOSX_ICON_FILE ${CMAKE_CURRENT_BINARY_DIR}/AppIcon.icns)
+            add_custom_command(
+                OUTPUT ${MACOSX_ICON_FILE}
+                COMMAND ${CMAKE_COMMAND}
+                        -DINPUT=${APP_ICON_SOURCE}
+                        -DOUTPUT=${MACOSX_ICON_FILE}
+                        -P ${RUNTIME_SOURCE_DIR}/cmake/macos_bundle_icon.cmake
+                DEPENDS ${APP_ICON_SOURCE}
+                COMMENT "Generating macOS icon for ${ARG_TARGET}"
+                VERBATIM
+            )
+        else()
+            message(WARNING "${ARG_TARGET}: icon.png not found; macOS bundle will use the default icon")
+        endif()
+    endif()
+
     # Compile based on REACT_BUNDLE_MODE
     if(REACT_BUNDLE_MODE EQUAL 0)
         # Mode 0: Native compilation with shermes (slowest build, fastest runtime)
@@ -148,16 +170,31 @@ function(add_react_imgui_app)
 
     message(STATUS "${ARG_TARGET}: React bundle path: ${REACT_UNIT_OUTPUT}")
 
-    # Create the executable
+    # Create the executable target
+    set(APP_TARGET_SOURCES ${ARG_SOURCES})
     if(REACT_BUNDLE_MODE EQUAL 0)
-        # In mode 0, the .o file gets linked directly
-        add_executable(${ARG_TARGET} ${ARG_SOURCES} ${REACT_UNIT_OUTPUT})
+        list(APPEND APP_TARGET_SOURCES ${REACT_UNIT_OUTPUT})
+    endif()
+
+    if(APPLE)
+        add_executable(${ARG_TARGET} MACOSX_BUNDLE ${APP_TARGET_SOURCES})
     else()
-        # In modes 1 and 2, the bundle is loaded at runtime
-        add_executable(${ARG_TARGET} ${ARG_SOURCES})
-        # Make sure React bundle/bytecode is built before linking
+        add_executable(${ARG_TARGET} ${APP_TARGET_SOURCES})
+    endif()
+
+    if(REACT_BUNDLE_MODE EQUAL 0)
+        # React native object already part of sources
+    else()
         add_custom_target(${ARG_TARGET}_react_unit DEPENDS ${REACT_UNIT_OUTPUT})
         add_dependencies(${ARG_TARGET} ${ARG_TARGET}_react_unit)
+    endif()
+
+    if(APPLE)
+        if(MACOSX_ICON_FILE)
+            set_source_files_properties(${MACOSX_ICON_FILE} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
+            target_sources(${ARG_TARGET} PRIVATE ${MACOSX_ICON_FILE})
+            set_target_properties(${ARG_TARGET} PROPERTIES MACOSX_BUNDLE_ICON_FILE "AppIcon.icns")
+        endif()
     endif()
 
     # Set compile definitions

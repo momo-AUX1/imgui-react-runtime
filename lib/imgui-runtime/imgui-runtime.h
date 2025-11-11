@@ -20,10 +20,15 @@ void imgui_load_unit(facebook::hermes::HermesRuntime *hermes,
                      SHUnitCreator nativeUnit, bool bytecode,
                      const char *jsPath, const char *sourceURL);
 
+/// Configure runtime bundle information for optional hot reload support.
+/// Safe to call multiple times; passing nullptr clears the bundle path.
+void imgui_runtime_set_bundle_info(int bundleMode, const char *bundlePath);
+
 /// A simple default implementation of imgui_main().
 template <int BUNDLE_MODE>
 void imgui_main_default(facebook::hermes::HermesRuntime *hermes,
                         SHUnitCreator sh_export_react, const char *bundlePath) {
+  imgui_runtime_set_bundle_info(BUNDLE_MODE, bundlePath);
   // Load react unit based on compilation mode
   if constexpr (BUNDLE_MODE == 0) {
     imgui_load_unit(hermes, sh_export_react, false, nullptr, nullptr);

@@ -242,21 +242,37 @@ function buildProject(projectPath = '.', buildType = 'Debug') {
   }
 
   const targetName = readTargetName(cmakeListsPath);
-  const executable = join(resolvedPath, buildDirName, targetName);
+  let executable = join(resolvedPath, buildDirName, targetName);
+  let appBundle = null;
+  if (process.platform === 'darwin') {
+    const bundleCandidate = join(resolvedPath, buildDirName, `${targetName}.app`);
+    if (existsSync(bundleCandidate)) {
+      appBundle = bundleCandidate;
+      executable = join(bundleCandidate, 'Contents', 'MacOS', targetName);
+    }
+  }
 
   if (!existsSync(executable)) {
     fail(`Executable not found at ${executable}`);
   }
 
-  console.log(`Build complete: ${executable}`);
-  return { resolvedPath, targetName, executable, buildType };
+  console.log(`Build complete: ${appBundle ?? executable}`);
+  return { resolvedPath, targetName, executable, buildType, appBundle };
 }
 
 function runProject(projectPath = '.', buildType = 'Debug') {
   const { resolvedPath, cmakeListsPath } = resolveProject(projectPath);
   const buildDirName = getBuildDirName(buildType);
   const targetName = readTargetName(cmakeListsPath);
-  const executable = join(resolvedPath, buildDirName, targetName);
+  let executable = join(resolvedPath, buildDirName, targetName);
+  let appBundle = null;
+  if (process.platform === 'darwin') {
+    const bundleCandidate = join(resolvedPath, buildDirName, `${targetName}.app`);
+    if (existsSync(bundleCandidate)) {
+      appBundle = bundleCandidate;
+      executable = join(bundleCandidate, 'Contents', 'MacOS', targetName);
+    }
+  }
 
   if (!existsSync(executable)) {
     const flag = buildType === 'Release' ? '--release' : '';
@@ -276,7 +292,8 @@ function runProject(projectPath = '.', buildType = 'Debug') {
     }
   }
 
-  console.log(`Running ${targetName} (${buildType})...\n`);
+  const displayTarget = appBundle ?? executable;
+  console.log(`Running ${displayTarget} (${buildType})...\n`);
   const child = spawn(executable, [], {
     cwd: resolvedPath,
     stdio: 'inherit'
