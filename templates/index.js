@@ -1,5 +1,5 @@
 import React from 'react';
-import { createRoot, render } from 'react-imgui-reconciler/reconciler.js';
+import { createRoot, render } from 'react-imgui';
 import { App } from './app.jsx';
 
 const PROJECT_TITLE = "__PROJECT_TITLE__";

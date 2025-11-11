@@ -3,11 +3,12 @@
 // See LICENSE file for full license text
 
 import React from 'react';
+import { Root, Text } from 'react-imgui';
 
 export function App() {
   return (
-    <root>
-      <text>Hello World!</text>
-    </root>
+    <Root>
+      <Text>Hello World!</Text>
+    </Root>
   );
 }

@@ -4,6 +4,7 @@
 
 // Bouncing ball component - demonstrates custom drawing with rect and circle
 import React, { useState, useEffect } from 'react';
+import { Window, ChildWindow, Rect, Circle } from 'react-imgui';
 
 export function BouncingBall() {
   // Content dimensions
@@ -61,18 +62,18 @@ export function BouncingBall() {
   }, [velocityX, velocityY]);
 
   return (
-    <window title="Bouncing Ball" defaultX={600} defaultY={350} flags={64}>
+    <Window title="Bouncing Ball" defaultX={600} defaultY={350} flags={64}>
       {/* flags=64 is ImGuiWindowFlags_AlwaysAutoResize */}
-      <child width={contentWidth} height={contentHeight} noPadding noScrollbar>
+      <ChildWindow width={contentWidth} height={contentHeight} noPadding noScrollbar>
         {/* White borders - top, left, bottom, right */}
-        <rect x={0} y={0} width={contentWidth} height={borderThickness} color="#FFFFFF" filled />
-        <rect x={0} y={0} width={borderThickness} height={contentHeight} color="#FFFFFF" filled />
-        <rect x={0} y={contentHeight - borderThickness} width={contentWidth} height={borderThickness} color="#FFFFFF" filled />
-        <rect x={contentWidth - borderThickness} y={0} width={borderThickness} height={contentHeight} color="#FFFFFF" filled />
+        <Rect x={0} y={0} width={contentWidth} height={borderThickness} color="#FFFFFF" filled />
+        <Rect x={0} y={0} width={borderThickness} height={contentHeight} color="#FFFFFF" filled />
+        <Rect x={0} y={contentHeight - borderThickness} width={contentWidth} height={borderThickness} color="#FFFFFF" filled />
+        <Rect x={contentWidth - borderThickness} y={0} width={borderThickness} height={contentHeight} color="#FFFFFF" filled />
 
         {/* Green bouncing ball */}
-        <circle x={ballX} y={ballY} radius={ballRadius} color="#00FF00" filled />
-      </child>
-    </window>
+        <Circle x={ballX} y={ballY} radius={ballRadius} color="#00FF00" filled />
+      </ChildWindow>
+    </Window>
   );
 }

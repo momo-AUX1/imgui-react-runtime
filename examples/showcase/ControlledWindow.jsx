@@ -4,6 +4,15 @@
 
 // Demonstration of controlled window position/size pattern
 import React, { useState } from 'react';
+import {
+  Window,
+  Text,
+  Separator,
+  Indent,
+  Button,
+  SameLine,
+  CollapsingHeader,
+} from 'react-imgui';
 
 export function ControlledWindow() {
   // Controlled window state
@@ -32,7 +41,7 @@ export function ControlledWindow() {
   };
 
   return (
-    <window
+    <Window
       title="Controlled Window Demo"
       x={windowState.x}
       y={windowState.y}
@@ -42,45 +51,45 @@ export function ControlledWindow() {
         setWindowState({ x, y, width, height });
       }}
     >
-      <text color="#FFAA00">This window is CONTROLLED by React state</text>
-      <text>Try moving or resizing it - state updates automatically!</text>
+      <Text color="#FFAA00">This window is CONTROLLED by React state</Text>
+      <Text>Try moving or resizing it - state updates automatically!</Text>
 
-      <separator />
+      <Separator />
 
-      <text color="#00FFFF">Current State:</text>
-      <indent>
-        <text>Position: ({Math.round(windowState.x)}, {Math.round(windowState.y)})</text>
-        <text>Size: {Math.round(windowState.width)} x {Math.round(windowState.height)}</text>
-      </indent>
+      <Text color="#00FFFF">Current State:</Text>
+      <Indent>
+        <Text>Position: ({Math.round(windowState.x)}, {Math.round(windowState.y)})</Text>
+        <Text>Size: {Math.round(windowState.width)} x {Math.round(windowState.height)}</Text>
+      </Indent>
 
-      <separator />
+      <Separator />
 
-      <text color="#00FF00">Programmatic Control:</text>
+      <Text color="#00FF00">Programmatic Control:</Text>
 
-      <button onClick={snapToOrigin}>Snap to Origin (20, 20)</button>
-      <button onClick={snapToCenter}>Snap to Center (400, 300)</button>
+      <Button onClick={snapToOrigin}>Snap to Origin (20, 20)</Button>
+      <Button onClick={snapToCenter}>Snap to Center (400, 300)</Button>
 
-      <separator />
+      <Separator />
 
-      <button onClick={makeWide}>Make Wide (600x250)</button>
-      <sameline />
-      <button onClick={makeTall}>Make Tall (350x400)</button>
+      <Button onClick={makeWide}>Make Wide (600x250)</Button>
+      <SameLine />
+      <Button onClick={makeTall}>Make Tall (350x400)</Button>
 
-      <separator />
+      <Separator />
 
-      <collapsingheader title="How This Works">
-        <text wrapped>
+      <CollapsingHeader title="How This Works">
+        <Text wrapped>
           This window uses x, y, width, and height props (not defaultX/defaultY).
           These props are enforced every frame using ImGuiCond_Always.
-        </text>
-        <text wrapped>
+        </Text>
+        <Text wrapped>
           When you move or resize the window, onWindowState fires with new values.
           We update React state, which updates the props, completing the cycle.
-        </text>
-        <text wrapped>
+        </Text>
+        <Text wrapped>
           The buttons demonstrate programmatic control: just update state!
-        </text>
-      </collapsingheader>
-    </window>
+        </Text>
+      </CollapsingHeader>
+    </Window>
   );
 }

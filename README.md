@@ -326,19 +326,20 @@ cd examples/myapp
 **app.jsx**:
 ```jsx
 import React, { useState } from 'react';
+import { Window, Text, Separator, Button } from 'react-imgui';
 
 export function App() {
   const [count, setCount] = useState(0);
 
   return (
-    <window title="My App">
-      <text>Welcome to my ImGui + React app!</text>
-      <separator />
-      <button onClick={() => setCount(count + 1)}>
+    <Window title="My App">
+      <Text>Welcome to my ImGui + React app!</Text>
+      <Separator />
+      <Button onClick={() => setCount(count + 1)}>
         Increment
-      </button>
-      <text>Count: {count}</text>
-    </window>
+      </Button>
+      <Text>Count: {count}</Text>
+    </Window>
   );
 }
 ```
@@ -346,7 +347,7 @@ export function App() {
 **index.js**:
 ```jsx
 import React from 'react';
-import { createRoot, render } from 'react-imgui-reconciler/reconciler.js';
+import { createRoot, render } from 'react-imgui';
 import { App } from './app.jsx';
 
 // Configure window (optional)
@@ -416,11 +417,16 @@ These components map directly to **native Dear ImGui widgets**—not web-style H
 
 **This is a demo project**, so only a representative subset of ImGui's widgets have been implemented. However, adding new components is straightforward—see [Adding New Components](#adding-new-components) below.
 
-All components use **lowercase names** in JSX (e.g., `<window>`, `<button>`). React treats lowercase as host primitives, uppercase as component references.
+All widgets are exported as **PascalCase React components** from the `react-imgui` package (for example `<Window />`, `<Button />`, `<Text />`). Import just the components you need alongside the reconciler helpers:
+
+```jsx
+import { Window, Text, Button, Separator } from 'react-imgui';
+```
+*** End Patch
 
 ### Container Components
 
-#### `<root>`
+#### `<Root />`
 
 Creates a fullscreen, transparent window covering the entire viewport. Perfect for background elements, overlays, and status bars that should appear behind or above all other windows.
 
@@ -431,23 +437,23 @@ Creates a fullscreen, transparent window covering the entire viewport. Perfect f
 - Transparent background (no visible window)
 - Cannot be moved or resized
 - Never brought to front on focus
-- **Only one `<root>` per app** (warning logged if multiple detected)
+- **Only one `<Root />` per app** (warning logged if multiple detected)
 
 **Example**:
 ```jsx
-<root>
+<Root>
   {/* Background decorations */}
-  <rect x={0} y={0} width={1200} height={30} color="#00000080" />
-  <text color="#00FF00">Status Bar</text>
+  <Rect x={0} y={0} width={1200} height={30} color="#00000080" />
+  <Text color="#00FF00">Status Bar</Text>
 
   {/* Regular windows appear in front */}
-  <window title="Main Window">
-    <text>Content here</text>
-  </window>
-</root>
+  <Window title="Main Window">
+    <Text>Content here</Text>
+  </Window>
+</Root>
 ```
 
-#### `<window>`
+#### `<Window />`
 
 Creates a standard ImGui window that can be moved, resized, and closed.
 
@@ -470,23 +476,23 @@ Creates a standard ImGui window that can be moved, resized, and closed.
 **Example**:
 ```jsx
 // Uncontrolled window - user can move freely
-<window title="Settings" defaultX={20} defaultY={20}>
-  <text>Configuration options...</text>
-</window>
+<Window title="Settings" defaultX={20} defaultY={20}>
+  <Text>Configuration options...</Text>
+</Window>
 
 // Controlled window - position managed by React state
-<window
+<Window
   title="Alert"
   x={centerX}
   y={centerY}
   onWindowState={(x, y, w, h) => console.log('Moved to', x, y)}
   onClose={() => setShowAlert(false)}
 >
-  <text>Alert message!</text>
-</window>
+  <Text>Alert message!</Text>
+</Window>
 ```
 
-#### `<child>`
+#### `<ChildWindow />`
 
 Creates a scrollable sub-region within a window.
 
@@ -497,17 +503,17 @@ Creates a scrollable sub-region within a window.
 
 **Example**:
 ```jsx
-<window title="Scrollable Content">
-  <child width={300} height={200}>
+<Window title="Scrollable Content">
+  <ChildWindow width={300} height={200}>
     {/* Lots of content that will scroll */}
-    {items.map(item => <text key={item.id}>{item.name}</text>)}
-  </child>
-</window>
+    {items.map((item) => <Text key={item.id}>{item.name}</Text>)}
+  </ChildWindow>
+</Window>
 ```
 
 ### Text & Display
 
-#### `<text>`
+#### `<Text />`
 
 Renders text with optional styling.
 
@@ -520,14 +526,14 @@ Renders text with optional styling.
 
 **Example**:
 ```jsx
-<text>Normal text</text>
-<text color="#FF0000">Red text</text>
-<text color="#00FF00AA">Semi-transparent green</text>
-<text disabled>Disabled text</text>
-<text wrapped>This is a very long text that will wrap to multiple lines...</text>
+<Text>Normal text</Text>
+<Text color="#FF0000">Red text</Text>
+<Text color="#00FF00AA">Semi-transparent green</Text>
+<Text disabled>Disabled text</Text>
+<Text wrapped>This is a very long text that will wrap to multiple lines...</Text>
 ```
 
-#### `<separator>`
+#### `<Separator />`
 
 Renders a horizontal separator line.
 
@@ -535,14 +541,14 @@ Renders a horizontal separator line.
 
 **Example**:
 ```jsx
-<text>Section 1</text>
-<separator />
-<text>Section 2</text>
+<Text>Section 1</Text>
+<Separator />
+<Text>Section 2</Text>
 ```
 
 ### Interactive Components
 
-#### `<button>`
+#### `<Button />`
 
 Clickable button with an event handler.
 

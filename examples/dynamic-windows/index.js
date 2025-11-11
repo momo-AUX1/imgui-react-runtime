@@ -3,7 +3,7 @@
 // See LICENSE file for full license text
 
 import React from 'react';
-import { createRoot, render } from 'react-imgui-reconciler/reconciler.js';
+import { createRoot, render } from 'react-imgui';
 import { App } from './app.jsx';
 
 // Configure window

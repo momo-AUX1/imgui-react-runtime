@@ -1,16 +1,17 @@
 import React, { useState } from 'react';
+import { Window, Text, Separator, Button } from 'react-imgui';
 
 export function App() {
   const [count, setCount] = useState(0);
 
   return (
-    <window title="My React + ImGui App" defaultX={20} defaultY={20}>
-      <text>Welcome to your new React + ImGui application!</text>
-      <separator />
-      <button onClick={() => setCount(count + 1)}>
+    <Window title="My React + ImGui App" defaultX={20} defaultY={20}>
+      <Text>Welcome to your new React + ImGui application!</Text>
+      <Separator />
+      <Button onClick={() => setCount(count + 1)}>
         Click me!
-      </button>
-      <text>Button clicked {count} times</text>
-    </window>
+      </Button>
+      <Text>Button clicked {count} times</Text>
+    </Window>
   );
 }

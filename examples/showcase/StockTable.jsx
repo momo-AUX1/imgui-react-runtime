@@ -4,6 +4,15 @@
 
 // Stock table component - displays live-updating stock prices for cities
 import React, { useState, useEffect } from 'react';
+import {
+  Window,
+  Table,
+  TableColumn,
+  TableHeader,
+  TableRow,
+  TableCell,
+  Text,
+} from 'react-imgui';
 
 // City names for the stock table
 const CITIES = [
@@ -63,34 +72,34 @@ export function StockTable() {
   }, []);
 
   return (
-    <window title="Cities Stock Prices" defaultX={100} defaultY={150} defaultWidth={600}>
-      <table id="stockTable" columns={NUM_COLS + 1}>
-        <tablecolumn label="City" flags={16} width={0} />
-        <tablecolumn label="Col 1" flags={8} width={0} />
-        <tablecolumn label="Col 2" flags={8} width={0} />
-        <tablecolumn label="Col 3" flags={8} width={0} />
-        <tablecolumn label="Col 4" flags={8} width={0} />
-        <tablecolumn label="Col 5" flags={8} width={0} />
-        <tablecolumn label="Col 6" flags={8} width={0} />
-        <tablecolumn label="Col 7" flags={8} width={0} />
-        <tablecolumn label="Col 8" flags={8} width={0} />
-        <tableheader />
+    <Window title="Cities Stock Prices" defaultX={100} defaultY={150} defaultWidth={600}>
+      <Table id="stockTable" columns={NUM_COLS + 1}>
+        <TableColumn label="City" flags={16} width={0} />
+        <TableColumn label="Col 1" flags={8} width={0} />
+        <TableColumn label="Col 2" flags={8} width={0} />
+        <TableColumn label="Col 3" flags={8} width={0} />
+        <TableColumn label="Col 4" flags={8} width={0} />
+        <TableColumn label="Col 5" flags={8} width={0} />
+        <TableColumn label="Col 6" flags={8} width={0} />
+        <TableColumn label="Col 7" flags={8} width={0} />
+        <TableColumn label="Col 8" flags={8} width={0} />
+        <TableHeader />
 
         {data.map((row, rowIndex) => (
-          <tablerow key={rowIndex}>
-            <tablecell index={0}>
-              <text>{CITIES[rowIndex % CITIES.length]}</text>
-            </tablecell>
+          <TableRow key={rowIndex}>
+            <TableCell index={0}>
+              <Text>{CITIES[rowIndex % CITIES.length]}</Text>
+            </TableCell>
             {row.map((value, colIndex) => (
-              <tablecell key={colIndex} index={colIndex + 1}>
-                <text color={getValueColor(value)}>
+              <TableCell key={colIndex} index={colIndex + 1}>
+                <Text color={getValueColor(value)}>
                   {value.toFixed(2)}
-                </text>
-              </tablecell>
+                </Text>
+              </TableCell>
             ))}
-          </tablerow>
+          </TableRow>
         ))}
-      </table>
-    </window>
+      </Table>
+    </Window>
   );
 }

@@ -3,6 +3,7 @@
 // See LICENSE file for full license text
 
 import React, { useState } from 'react';
+import { Window, Text, Separator, Button } from 'react-imgui';
 
 export function App() {
   const [windows, setWindows] = useState([
@@ -22,17 +23,17 @@ export function App() {
 
   return (
     <>
-      <window title="Control Panel" defaultX={20} defaultY={20} defaultWidth={300} defaultHeight={150}>
-        <text color="#FFFF00">Dynamic Window Manager</text>
-        <separator />
-        <text>Total windows: {windows.length}</text>
-        <button onClick={addWindow}>Add New Window</button>
-        <separator />
-        <text color="#888888">Click the X button on any window to close it</text>
-      </window>
+      <Window title="Control Panel" defaultX={20} defaultY={20} defaultWidth={300} defaultHeight={150}>
+        <Text color="#FFFF00">Dynamic Window Manager</Text>
+        <Separator />
+        <Text>Total windows: {windows.length}</Text>
+        <Button onClick={addWindow}>Add New Window</Button>
+        <Separator />
+        <Text color="#888888">Click the X button on any window to close it</Text>
+      </Window>
 
       {windows.map(w => (
-        <window
+        <Window
           key={w.id}
           title={w.title}
           defaultX={100 + (w.id * 30)}
@@ -41,13 +42,13 @@ export function App() {
           defaultHeight={200}
           onClose={() => closeWindow(w.id)}
         >
-          <text color="#00FFFF">This is {w.title}</text>
-          <separator />
-          <text>Window ID: {w.id}</text>
-          <text>Click the X button in the title bar to close this window</text>
-          <separator />
-          <text color="#00FF00">Each window can be closed independently</text>
-        </window>
+          <Text color="#00FFFF">This is {w.title}</Text>
+          <Separator />
+          <Text>Window ID: {w.id}</Text>
+          <Text>Click the X button in the title bar to close this window</Text>
+          <Separator />
+          <Text color="#00FF00">Each window can be closed independently</Text>
+        </Window>
       ))}
     </>
   );

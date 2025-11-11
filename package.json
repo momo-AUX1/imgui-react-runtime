@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "React runtime for Dear ImGui powered by Static Hermes",
   "main": "index.js",
+  "types": "./lib/react-imgui/index.d.ts",
   "bin": {
     "react-imgui": "./bin/react-imgui.js"
   },

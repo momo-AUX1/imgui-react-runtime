@@ -39,6 +39,7 @@ if (!entryPoint || !outfile) {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const libDir = resolve(__dirname, '../lib/react-imgui-reconciler');
+const runtimeDir = resolve(__dirname, '../lib/react-imgui');
 const projectRoot = resolve(__dirname, '..');
 const babelConfigPath = resolve(projectRoot, '.babelrc.cjs');
 
@@ -75,6 +76,7 @@ const projectPackageRoot = findPackageRoot(entryDir);
 // so we don't end up with two React copies bundled (which breaks hooks).
 const alias = {
   'react-imgui-reconciler': libDir,
+  'react-imgui': runtimeDir,
 };
 
 const reactAliasRoots = [];
