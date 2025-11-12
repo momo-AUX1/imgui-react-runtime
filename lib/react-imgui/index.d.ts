@@ -227,6 +227,117 @@ export interface SpacingProps {
   children?: ReactNode;
 }
 
+export interface InputTextProps {
+  label?: string;
+  value?: string;
+  defaultValue?: string;
+  maxLength?: number;
+  placeholder?: string;
+  flags?: number;
+  onChange?: (value: string) => void;
+  children?: ReactNode;
+}
+
+export interface InputFloatProps {
+  label?: string;
+  value?: number;
+  defaultValue?: number;
+  step?: number;
+  stepFast?: number;
+  format?: string;
+  flags?: number;
+  onChange?: (value: number) => void;
+}
+
+export interface InputIntProps {
+  label?: string;
+  value?: number;
+  defaultValue?: number;
+  step?: number;
+  stepFast?: number;
+  flags?: number;
+  onChange?: (value: number) => void;
+}
+
+export interface DragFloatProps {
+  label?: string;
+  value?: number;
+  defaultValue?: number;
+  speed?: number;
+  min?: number;
+  max?: number;
+  format?: string;
+  flags?: number;
+  onChange?: (value: number) => void;
+}
+
+export interface DragIntProps {
+  label?: string;
+  value?: number;
+  defaultValue?: number;
+  speed?: number;
+  min?: number;
+  max?: number;
+  format?: string;
+  flags?: number;
+  onChange?: (value: number) => void;
+}
+
+export interface ComboProps {
+  label?: string;
+  items: string[];
+  selectedIndex?: number;
+  defaultIndex?: number;
+  maxHeightItems?: number;
+  onChange?: (index: number, item: string) => void;
+}
+
+export interface SelectableProps {
+  label?: string;
+  selected?: boolean;
+  defaultSelected?: boolean;
+  flags?: number;
+  width?: number;
+  height?: number;
+  onChange?: (selected: boolean) => void;
+  children?: ReactNode;
+}
+
+export interface RadioButtonProps {
+  label?: string;
+  value?: string | number;
+  selectedValue?: string | number;
+  selected?: boolean;
+  defaultSelected?: boolean;
+  onChange?: (value: string | number | boolean) => void;
+  children?: ReactNode;
+}
+
+export interface ColorEdit3Props {
+  label?: string;
+  value?: ImColor;
+  defaultValue?: ImColor;
+  flags?: number;
+  onChange?: (color: { r: number; g: number; b: number }) => void;
+}
+
+export interface ColorEdit4Props {
+  label?: string;
+  value?: ImColor;
+  defaultValue?: ImColor;
+  flags?: number;
+  onChange?: (color: { r: number; g: number; b: number; a: number }) => void;
+}
+
+export interface ColorButtonProps {
+  label?: string;
+  color?: ImColor;
+  flags?: number;
+  width?: number;
+  height?: number;
+  onClick?: () => void;
+}
+
 export interface ReactImguiRoot {
   container: {
     rootChildren: unknown[];
@@ -256,6 +367,17 @@ export declare const SliderFloat: (props: SliderFloatProps) => JSX.Element;
 export declare const SliderInt: (props: SliderIntProps) => JSX.Element;
 export declare const ProgressBar: (props: ProgressBarProps) => JSX.Element;
 export declare const Spacing: (props: SpacingProps) => JSX.Element;
+export declare const InputText: (props: InputTextProps) => JSX.Element;
+export declare const InputFloat: (props: InputFloatProps) => JSX.Element;
+export declare const InputInt: (props: InputIntProps) => JSX.Element;
+export declare const DragFloat: (props: DragFloatProps) => JSX.Element;
+export declare const DragInt: (props: DragIntProps) => JSX.Element;
+export declare const Combo: (props: ComboProps) => JSX.Element;
+export declare const Selectable: (props: SelectableProps) => JSX.Element;
+export declare const RadioButton: (props: RadioButtonProps) => JSX.Element;
+export declare const ColorEdit3: (props: ColorEdit3Props) => JSX.Element;
+export declare const ColorEdit4: (props: ColorEdit4Props) => JSX.Element;
+export declare const ColorButton: (props: ColorButtonProps) => JSX.Element;
 export declare const Platform: PlatformModule;
 export declare const Dimensions: DimensionsModule;
 
