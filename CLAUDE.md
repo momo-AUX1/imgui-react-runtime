@@ -398,6 +398,8 @@ This replaces what was previously 80+ lines of boilerplate CMake code.
 - ✅ **Button clicks and event handling functional**
 - ✅ **Window positioning with x/y props**
 - ✅ **Multiple independent windows with separate state**
+- ✅ **ImGui event callbacks now wrap React state updates with flushSync/discrete batching for immediate UI refresh**
+- ✅ **Initial StyleSheet + `style` prop support (colors, background colors, width/height) for text, button, checkbox, selectable, and radio button widgets**
 
 **Implemented Components:**
 - `<window>` - ImGui window with title, optional positioning, and close button support

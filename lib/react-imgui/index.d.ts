@@ -9,6 +9,15 @@ export type ImColor =
       a?: number;
     };
 
+export interface ImguiStyle {
+  color?: ImColor;
+  backgroundColor?: ImColor;
+  width?: number;
+  height?: number;
+}
+
+export type StyleProp<T> = T | T[] | null | undefined;
+
 export type PlatformOS =
   | 'ios'
   | 'android'
@@ -148,11 +157,13 @@ export interface ChildWindowProps {
 }
 
 export interface ButtonProps {
+  style?: StyleProp<ImguiStyle>;
   onClick?: () => void;
   children?: ReactNode;
 }
 
 export interface TextProps {
+  style?: StyleProp<ImguiStyle>;
   color?: ImColor;
   disabled?: boolean;
   wrapped?: boolean;
@@ -230,6 +241,7 @@ export interface CircleProps {
 }
 
 export interface CheckboxProps {
+  style?: StyleProp<ImguiStyle>;
   label?: string;
   checked?: boolean;
   defaultChecked?: boolean;
@@ -339,6 +351,7 @@ export interface ComboProps {
 }
 
 export interface SelectableProps {
+  style?: StyleProp<ImguiStyle>;
   label?: string;
   selected?: boolean;
   defaultSelected?: boolean;
@@ -350,6 +363,7 @@ export interface SelectableProps {
 }
 
 export interface RadioButtonProps {
+  style?: StyleProp<ImguiStyle>;
   label?: string;
   value?: string | number;
   selectedValue?: string | number;
@@ -392,6 +406,13 @@ export interface NavigationState {
 export interface NavigationModule {
   configure(options: Partial<NavigationState>): NavigationState;
   getState(): NavigationState;
+}
+
+export interface StyleSheetStatic {
+  create<T extends { [key: string]: ImguiStyle }>(styles: T): { [K in keyof T]: ImguiStyle };
+  compose<T>(style1?: StyleProp<T>, style2?: StyleProp<T>): StyleProp<T>;
+  flatten<T>(style?: StyleProp<T>): T | undefined;
+  hairlineWidth: number;
 }
 
 export interface ReactImguiRoot {
@@ -441,7 +462,11 @@ export declare const ColorButton: (props: ColorButtonProps) => JSX.Element;
 export declare const Platform: PlatformModule;
 export declare const Dimensions: DimensionsModule;
 export declare const Navigation: NavigationModule;
+export declare const StyleSheet: StyleSheetStatic;
 
 export declare function createRoot(): ReactImguiRoot;
 export declare function render(element: ReactElement, root: ReactImguiRoot): Promise<ReactImguiRoot['container']>;
 export declare function useWindowDimensions(): DimensionMetrics;
+export declare function batchedUpdates<A extends any[], R>(fn: (...args: A) => R, ...args: A): R;
+export declare function discreteUpdates<A extends any[], R>(fn: (...args: A) => R, ...args: A): R;
+export declare function flushSync<R>(fn: () => R): R;
