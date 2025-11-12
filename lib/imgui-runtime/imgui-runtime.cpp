@@ -16,6 +16,10 @@
 // Must be separate to avoid reordering.
 #include "sokol_debugtext.h"
 
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
 #include <hermes/VM/static_h.h>
 
 #include <cmath>
@@ -57,6 +61,166 @@ public:
 static HermesApp *s_hermesApp = nullptr;
 
 static sg_sampler s_sampler = {};
+
+struct PlatformInfo {
+  std::string os;
+  bool ios = false;
+  bool android = false;
+  bool macos = false;
+  bool windows = false;
+  bool linux = false;
+  bool web = false;
+  bool isNative = false;
+  bool isDesktop = false;
+  bool isMobile = false;
+  bool isTV = false;
+  double version = 0;
+};
+
+static PlatformInfo detect_platform_info() {
+  PlatformInfo info;
+
+#if defined(__EMSCRIPTEN__)
+  info.os = "web";
+  info.web = true;
+  info.isNative = false;
+  info.isDesktop = false;
+  info.isMobile = false;
+#elif defined(__ANDROID__)
+  info.os = "android";
+  info.android = true;
+  info.isNative = true;
+  info.isMobile = true;
+#elif defined(__APPLE__)
+#if defined(TARGET_OS_TV) && TARGET_OS_TV
+  info.os = "ios";
+  info.ios = true;
+  info.isNative = true;
+  info.isTV = true;
+  info.isMobile = true;
+#elif defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+  info.os = "ios";
+  info.ios = true;
+  info.isNative = true;
+  info.isMobile = true;
+#else
+  info.os = "macos";
+  info.macos = true;
+  info.isNative = true;
+  info.isDesktop = true;
+#endif
+#elif defined(_WIN32)
+  info.os = "windows";
+  info.windows = true;
+  info.isNative = true;
+  info.isDesktop = true;
+#elif defined(__linux__)
+  info.os = "linux";
+  info.linux = true;
+  info.isNative = true;
+  info.isDesktop = true;
+#else
+  info.os = "unknown";
+  info.isNative = true;
+#endif
+
+  if (info.os.empty()) {
+    info.os = "unknown";
+  }
+
+  if (!info.isDesktop && info.isNative && !info.isMobile && !info.isTV) {
+    info.isDesktop = true;
+  }
+
+  return info;
+}
+
+static void push_platform_info_to_js(facebook::hermes::HermesRuntime *hermes) {
+  if (!hermes) {
+    return;
+  }
+
+  try {
+    auto global = hermes->global();
+    if (!global.hasProperty(*hermes, "__setPlatformInfo")) {
+      return;
+    }
+
+    PlatformInfo info = detect_platform_info();
+
+    facebook::jsi::Object payload(*hermes);
+    payload.setProperty(
+        *hermes, "os",
+        facebook::jsi::String::createFromUtf8(*hermes, info.os));
+    payload.setProperty(*hermes, "ios", facebook::jsi::Value(info.ios));
+    payload.setProperty(*hermes, "android",
+                        facebook::jsi::Value(info.android));
+    payload.setProperty(*hermes, "macos", facebook::jsi::Value(info.macos));
+    payload.setProperty(*hermes, "windows",
+                        facebook::jsi::Value(info.windows));
+    payload.setProperty(*hermes, "linux", facebook::jsi::Value(info.linux));
+    payload.setProperty(*hermes, "web", facebook::jsi::Value(info.web));
+    payload.setProperty(*hermes, "isNative",
+                        facebook::jsi::Value(info.isNative));
+    payload.setProperty(*hermes, "isWeb", facebook::jsi::Value(info.web));
+    payload.setProperty(*hermes, "isDesktop",
+                        facebook::jsi::Value(info.isDesktop));
+    payload.setProperty(*hermes, "isMobile",
+                        facebook::jsi::Value(info.isMobile));
+    payload.setProperty(*hermes, "isTV", facebook::jsi::Value(info.isTV));
+    payload.setProperty(*hermes, "version",
+                        facebook::jsi::Value(info.version));
+
+    global.getPropertyAsFunction(*hermes, "__setPlatformInfo")
+        .call(*hermes, std::move(payload));
+  } catch (const facebook::jsi::JSIException &error) {
+    slog_func("ERROR", 1, 0, error.what(), __LINE__, __FILE__, nullptr);
+  } catch (const std::exception &error) {
+    slog_func("ERROR", 1, 0, error.what(), __LINE__, __FILE__, nullptr);
+  }
+}
+
+static int s_lastWindowWidth = -1;
+static int s_lastWindowHeight = -1;
+static float s_lastDpiScale = 0.0f;
+static float s_lastFontScale = 0.0f;
+
+static void push_window_metrics_to_js() {
+  if (!s_hermesApp || !s_hermesApp->hermes) {
+    return;
+  }
+
+  int width = sapp_width();
+  int height = sapp_height();
+  float dpiScale = sapp_dpi_scale();
+  float fontScale = dpiScale;
+
+  if (width == s_lastWindowWidth && height == s_lastWindowHeight &&
+      std::fabs(dpiScale - s_lastDpiScale) < 0.001f &&
+      std::fabs(fontScale - s_lastFontScale) < 0.001f) {
+    return;
+  }
+
+  s_lastWindowWidth = width;
+  s_lastWindowHeight = height;
+  s_lastDpiScale = dpiScale;
+  s_lastFontScale = fontScale;
+
+  try {
+    auto global = s_hermesApp->hermes->global();
+    if (!global.hasProperty(*s_hermesApp->hermes, "__setWindowMetrics")) {
+      return;
+    }
+
+    global.getPropertyAsFunction(*s_hermesApp->hermes, "__setWindowMetrics")
+        .call(*s_hermesApp->hermes, (double)width, (double)height,
+              (double)dpiScale, (double)fontScale);
+  } catch (const facebook::jsi::JSIException &error) {
+    slog_func("ERROR", 1, 0, error.what(), __LINE__, __FILE__, nullptr);
+  } catch (const std::exception &error) {
+    slog_func("ERROR", 1, 0, error.what(), __LINE__, __FILE__, nullptr);
+  }
+}
 
 namespace {
 
@@ -793,6 +957,7 @@ static void app_init() {
         .getPropertyAsFunction(*s_hermesApp->hermes, "on_init")
         .call(*s_hermesApp->hermes);
     s_hermesApp->hermes->drainMicrotasks();
+    push_window_metrics_to_js();
   } catch (facebook::jsi::JSIException &e) {
     slog_func("ERROR", 1, 0, e.what(), __LINE__, __FILE__, nullptr);
     abort();
@@ -872,6 +1037,7 @@ static void app_frame() {
   }
 
   maybe_handle_hot_reload();
+  push_window_metrics_to_js();
 
   if (!s_started) {
     s_started = true;
@@ -1160,6 +1326,8 @@ sapp_desc sokol_main(int argc, char *argv[]) {
                size_t) -> facebook::jsi::Value { return stm_ms(stm_now()); }));
     s_hermesApp->hermes->global().setProperty(*s_hermesApp->hermes,
                                               "performance", perf);
+
+  push_platform_info_to_js(hermes);
 
     // Create globalThis.sappConfig with default title
     auto sappConfig = facebook::jsi::Object(*s_hermesApp->hermes);

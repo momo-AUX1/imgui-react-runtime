@@ -9,6 +9,70 @@ export type ImColor =
       a?: number;
     };
 
+export type PlatformOS =
+  | 'ios'
+  | 'android'
+  | 'macos'
+  | 'windows'
+  | 'linux'
+  | 'web'
+  | 'unknown';
+
+export interface PlatformConstants {
+  os: PlatformOS;
+  isTesting?: boolean;
+  [key: string]: unknown;
+}
+
+export type PlatformSelectSpec<T> = {
+  ios?: T;
+  android?: T;
+  macos?: T;
+  windows?: T;
+  linux?: T;
+  web?: T;
+  default?: T;
+  [key: string]: T | undefined;
+};
+
+export interface PlatformModule {
+  readonly OS: PlatformOS;
+  readonly Version: number | string | undefined;
+  readonly isTV: boolean;
+  readonly isTesting: boolean;
+  readonly constants: PlatformConstants;
+  readonly isNative: boolean;
+  readonly isWeb: boolean;
+  readonly isDesktop: boolean;
+  readonly isMobile: boolean;
+  readonly ios: boolean;
+  readonly android: boolean;
+  readonly macos: boolean;
+  readonly windows: boolean;
+  readonly linux: boolean;
+  select<T>(spec: PlatformSelectSpec<T>): T | undefined;
+}
+
+export interface DimensionMetrics {
+  width: number;
+  height: number;
+  scale: number;
+  fontScale: number;
+}
+
+export interface DimensionsChangeEvent {
+  window: DimensionMetrics;
+  screen: DimensionMetrics;
+}
+
+export type DimensionsListener = (event: DimensionsChangeEvent) => void;
+
+export interface DimensionsModule {
+  get(dim: 'window' | 'screen'): DimensionMetrics;
+  addEventListener(type: 'change', handler: DimensionsListener): { remove(): void };
+  removeEventListener(type: 'change', handler: DimensionsListener): void;
+}
+
 export interface RootProps {
   children?: ReactNode;
 }
@@ -192,6 +256,9 @@ export declare const SliderFloat: (props: SliderFloatProps) => JSX.Element;
 export declare const SliderInt: (props: SliderIntProps) => JSX.Element;
 export declare const ProgressBar: (props: ProgressBarProps) => JSX.Element;
 export declare const Spacing: (props: SpacingProps) => JSX.Element;
+export declare const Platform: PlatformModule;
+export declare const Dimensions: DimensionsModule;
 
 export declare function createRoot(): ReactImguiRoot;
 export declare function render(element: ReactElement, root: ReactImguiRoot): Promise<ReactImguiRoot['container']>;
+export declare function useWindowDimensions(): DimensionMetrics;
