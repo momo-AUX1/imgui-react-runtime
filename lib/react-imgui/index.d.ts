@@ -119,6 +119,50 @@ export interface CircleProps {
   children?: ReactNode;
 }
 
+export interface CheckboxProps {
+  label?: string;
+  checked?: boolean;
+  defaultChecked?: boolean;
+  onChange?: (checked: boolean) => void;
+  children?: ReactNode;
+}
+
+export interface SliderFloatProps {
+  label?: string;
+  value?: number;
+  defaultValue?: number;
+  min?: number;
+  max?: number;
+  format?: string;
+  flags?: number;
+  onChange?: (value: number) => void;
+}
+
+export interface SliderIntProps {
+  label?: string;
+  value?: number;
+  defaultValue?: number;
+  min?: number;
+  max?: number;
+  format?: string;
+  flags?: number;
+  onChange?: (value: number) => void;
+}
+
+export interface ProgressBarProps {
+  value?: number;
+  min?: number;
+  max?: number;
+  overlay?: string;
+  width?: number;
+  height?: number;
+}
+
+export interface SpacingProps {
+  count?: number;
+  children?: ReactNode;
+}
+
 export interface ReactImguiRoot {
   container: {
     rootChildren: unknown[];
@@ -143,6 +187,11 @@ export declare const TableCell: (props: TableCellProps) => JSX.Element;
 export declare const TableColumn: (props: TableColumnProps) => JSX.Element;
 export declare const Rect: (props: RectProps) => JSX.Element;
 export declare const Circle: (props: CircleProps) => JSX.Element;
+export declare const Checkbox: (props: CheckboxProps) => JSX.Element;
+export declare const SliderFloat: (props: SliderFloatProps) => JSX.Element;
+export declare const SliderInt: (props: SliderIntProps) => JSX.Element;
+export declare const ProgressBar: (props: ProgressBarProps) => JSX.Element;
+export declare const Spacing: (props: SpacingProps) => JSX.Element;
 
 export declare function createRoot(): ReactImguiRoot;
 export declare function render(element: ReactElement, root: ReactImguiRoot): Promise<ReactImguiRoot['container']>;

@@ -21,10 +21,18 @@
 #include <cmath>
 #include <climits>
 #include <filesystem>
+#include <mutex>
+#include <queue>
+#include <thread>
+#include <atomic>
+#include <cctype>
+#include <utility>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
+
+#include <curl/curl.h>
 
 // Hermes runtime and event loop management
 class HermesApp {
@@ -96,6 +104,460 @@ const EmbeddedImage *find_embedded_image(std::string_view key) {
 }
 
 } // namespace
+
+struct NativeFetchRequest {
+  int id = 0;
+  std::string url;
+  std::string method = "GET";
+  std::vector<std::pair<std::string, std::string>> headers;
+  std::string body;
+  bool hasBody = false;
+  long timeoutMs = -1;
+  bool followRedirects = true;
+};
+
+struct NativeFetchResult {
+  int id = 0;
+  bool ok = false;
+  int status = 0;
+  std::string statusText;
+  std::string url;
+  std::string errorMessage;
+  std::vector<std::pair<std::string, std::string>> headers;
+  std::string bodyBase64;
+};
+
+static std::atomic<int> s_nextFetchRequestId{1};
+static std::mutex s_fetchQueueMutex;
+static std::queue<NativeFetchResult> s_completedFetches;
+
+static const char kBase64Alphabet[] =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+static inline char encodeBase64Char(unsigned char value) {
+  return kBase64Alphabet[value & 0x3F];
+}
+
+static std::string base64Encode(const std::vector<unsigned char> &input) {
+  if (input.empty()) {
+    return {};
+  }
+
+  std::string encoded;
+  encoded.reserve(((input.size() + 2) / 3) * 4);
+
+  size_t i = 0;
+  while (i + 2 < input.size()) {
+    unsigned int triple = (input[i] << 16) | (input[i + 1] << 8) | input[i + 2];
+    encoded.push_back(encodeBase64Char((triple >> 18) & 0x3F));
+    encoded.push_back(encodeBase64Char((triple >> 12) & 0x3F));
+    encoded.push_back(encodeBase64Char((triple >> 6) & 0x3F));
+    encoded.push_back(encodeBase64Char(triple & 0x3F));
+    i += 3;
+  }
+
+  if (i < input.size()) {
+    unsigned int triple = input[i] << 16;
+    encoded.push_back(encodeBase64Char((triple >> 18) & 0x3F));
+    if (i + 1 < input.size()) {
+      triple |= input[i + 1] << 8;
+      encoded.push_back(encodeBase64Char((triple >> 12) & 0x3F));
+      encoded.push_back(encodeBase64Char((triple >> 6) & 0x3F));
+      encoded.push_back('=');
+    } else {
+      encoded.push_back(encodeBase64Char((triple >> 12) & 0x3F));
+      encoded.push_back('=');
+      encoded.push_back('=');
+    }
+  }
+
+  return encoded;
+}
+
+static std::string trim(const std::string &value) {
+  size_t start = 0;
+  size_t end = value.size();
+
+  while (start < end && std::isspace(static_cast<unsigned char>(value[start]))) {
+    ++start;
+  }
+  while (end > start &&
+         std::isspace(static_cast<unsigned char>(value[end - 1]))) {
+    --end;
+  }
+
+  return value.substr(start, end - start);
+}
+
+static std::string defaultReasonPhrase(int status) {
+  switch (status) {
+  case 200:
+    return "OK";
+  case 201:
+    return "Created";
+  case 202:
+    return "Accepted";
+  case 204:
+    return "No Content";
+  case 301:
+    return "Moved Permanently";
+  case 302:
+    return "Found";
+  case 304:
+    return "Not Modified";
+  case 400:
+    return "Bad Request";
+  case 401:
+    return "Unauthorized";
+  case 403:
+    return "Forbidden";
+  case 404:
+    return "Not Found";
+  case 405:
+    return "Method Not Allowed";
+  case 408:
+    return "Request Timeout";
+  case 409:
+    return "Conflict";
+  case 410:
+    return "Gone";
+  case 413:
+    return "Payload Too Large";
+  case 415:
+    return "Unsupported Media Type";
+  case 500:
+    return "Internal Server Error";
+  case 501:
+    return "Not Implemented";
+  case 502:
+    return "Bad Gateway";
+  case 503:
+    return "Service Unavailable";
+  default:
+    break;
+  }
+  return "";
+}
+
+static size_t writeBodyCallback(void *contents, size_t size, size_t nmemb,
+                                void *userp) {
+  auto *buffer = static_cast<std::vector<unsigned char> *>(userp);
+  size_t total = size * nmemb;
+  unsigned char *data = static_cast<unsigned char *>(contents);
+  buffer->insert(buffer->end(), data, data + total);
+  return total;
+}
+
+static size_t headerCallback(char *buffer, size_t size, size_t nitems,
+                             void *userp) {
+  auto *result = static_cast<NativeFetchResult *>(userp);
+  size_t total = size * nitems;
+  std::string line(buffer, total);
+
+  while (!line.empty() &&
+         (line.back() == '\r' || line.back() == '\n')) {
+    line.pop_back();
+  }
+
+  if (line.empty()) {
+    return total;
+  }
+
+  if (line.rfind("HTTP/", 0) == 0) {
+    // Status line, reset headers for final response segment
+    result->headers.clear();
+    size_t firstSpace = line.find(' ');
+    if (firstSpace != std::string::npos) {
+      size_t secondSpace = line.find(' ', firstSpace + 1);
+      if (secondSpace != std::string::npos) {
+        std::string statusCodeStr = line.substr(firstSpace + 1,
+                                                secondSpace - firstSpace - 1);
+        try {
+          result->status = std::stoi(statusCodeStr);
+        } catch (...) {
+          result->status = 0;
+        }
+        result->statusText = trim(line.substr(secondSpace + 1));
+      }
+    }
+  } else {
+    size_t colon = line.find(':');
+    if (colon != std::string::npos) {
+      std::string key = trim(line.substr(0, colon));
+      std::string value = trim(line.substr(colon + 1));
+      result->headers.emplace_back(std::move(key), std::move(value));
+    }
+  }
+
+  return total;
+}
+
+static void enqueueFetchResult(NativeFetchResult &&result) {
+  std::lock_guard<std::mutex> lock(s_fetchQueueMutex);
+  s_completedFetches.push(std::move(result));
+}
+
+static void performFetchRequest(NativeFetchRequest request) {
+  NativeFetchResult result;
+  result.id = request.id;
+  result.url = request.url;
+
+  CURL *curl = curl_easy_init();
+  if (!curl) {
+    result.errorMessage = "Failed to initialize CURL";
+    enqueueFetchResult(std::move(result));
+    return;
+  }
+
+  std::vector<unsigned char> responseBody;
+  struct curl_slist *headerList = nullptr;
+
+  curl_easy_setopt(curl, CURLOPT_URL, request.url.c_str());
+  curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION,
+                   request.followRedirects ? 1L : 0L);
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeBodyCallback);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &responseBody);
+  curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, headerCallback);
+  curl_easy_setopt(curl, CURLOPT_HEADERDATA, &result);
+  curl_easy_setopt(curl, CURLOPT_USERAGENT, "imgui-react-runtime/1.0");
+
+  if (request.timeoutMs >= 0) {
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, request.timeoutMs);
+  }
+
+  if (!request.headers.empty()) {
+    for (const auto &header : request.headers) {
+      std::string headerLine = header.first + ": " + header.second;
+      headerList = curl_slist_append(headerList, headerLine.c_str());
+    }
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headerList);
+  }
+
+  if (request.method == "GET") {
+    curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L);
+  } else if (request.method == "POST") {
+    curl_easy_setopt(curl, CURLOPT_POST, 1L);
+  } else {
+    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, request.method.c_str());
+  }
+
+  if (request.hasBody) {
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, request.body.c_str());
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE,
+                     static_cast<long>(request.body.size()));
+  }
+
+  char errorBuffer[CURL_ERROR_SIZE];
+  errorBuffer[0] = '\0';
+  curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errorBuffer);
+
+  CURLcode code = curl_easy_perform(curl);
+  if (code != CURLE_OK) {
+    if (errorBuffer[0] != '\0') {
+      result.errorMessage = errorBuffer;
+    } else {
+      result.errorMessage = curl_easy_strerror(code);
+    }
+  } else {
+    long statusCode = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &statusCode);
+    result.status = static_cast<int>(statusCode);
+    result.ok = statusCode >= 200 && statusCode < 300;
+    if (result.statusText.empty()) {
+      result.statusText = defaultReasonPhrase(result.status);
+    }
+
+    char *effectiveUrl = nullptr;
+    if (curl_easy_getinfo(curl, CURLINFO_EFFECTIVE_URL, &effectiveUrl) ==
+            CURLE_OK &&
+        effectiveUrl) {
+      result.url = effectiveUrl;
+    }
+
+    result.bodyBase64 = base64Encode(responseBody);
+  }
+
+  if (headerList) {
+    curl_slist_free_all(headerList);
+  }
+
+  curl_easy_cleanup(curl);
+  enqueueFetchResult(std::move(result));
+}
+
+static void processFetchResults(facebook::hermes::HermesRuntime *hermes) {
+  std::queue<NativeFetchResult> localQueue;
+  {
+    std::lock_guard<std::mutex> lock(s_fetchQueueMutex);
+    if (s_completedFetches.empty()) {
+      return;
+    }
+    std::swap(localQueue, s_completedFetches);
+  }
+
+  auto global = hermes->global();
+  if (!global.hasProperty(*hermes, "__onNativeFetchComplete")) {
+    // Nothing to dispatch to; drop results
+    return;
+  }
+
+  auto callback =
+      global.getPropertyAsFunction(*hermes, "__onNativeFetchComplete");
+
+  while (!localQueue.empty()) {
+    NativeFetchResult result = std::move(localQueue.front());
+    localQueue.pop();
+
+    facebook::jsi::Object resultObj(*hermes);
+    resultObj.setProperty(*hermes, "id",
+                          facebook::jsi::Value(result.id));
+
+    if (!result.errorMessage.empty()) {
+      resultObj.setProperty(
+          *hermes, "error",
+          facebook::jsi::String::createFromUtf8(*hermes, result.errorMessage));
+    } else {
+      resultObj.setProperty(*hermes, "ok",
+                            facebook::jsi::Value(result.ok));
+      resultObj.setProperty(*hermes, "status",
+                            facebook::jsi::Value(result.status));
+      resultObj.setProperty(
+          *hermes, "statusText",
+          facebook::jsi::String::createFromUtf8(*hermes, result.statusText));
+      resultObj.setProperty(
+          *hermes, "url",
+          facebook::jsi::String::createFromUtf8(*hermes, result.url));
+
+      facebook::jsi::Array headersArray(*hermes, result.headers.size());
+      for (size_t i = 0; i < result.headers.size(); ++i) {
+        const auto &header = result.headers[i];
+        facebook::jsi::Array headerPair(*hermes, 2);
+        headerPair.setValueAtIndex(
+            *hermes, 0,
+            facebook::jsi::String::createFromUtf8(*hermes, header.first));
+        headerPair.setValueAtIndex(
+            *hermes, 1,
+            facebook::jsi::String::createFromUtf8(*hermes, header.second));
+        headersArray.setValueAtIndex(*hermes, i, std::move(headerPair));
+      }
+      resultObj.setProperty(*hermes, "headers", std::move(headersArray));
+
+      resultObj.setProperty(
+          *hermes, "body",
+          facebook::jsi::String::createFromUtf8(*hermes, result.bodyBase64));
+    }
+
+    callback.call(*hermes, resultObj);
+    hermes->drainMicrotasks();
+  }
+}
+
+static facebook::jsi::Value
+nativeFetchStart(facebook::jsi::Runtime &runtime, const facebook::jsi::Value &,
+                 const facebook::jsi::Value *args, size_t count) {
+  if (count < 1 || !args[0].isString()) {
+    throw facebook::jsi::JSError(runtime,
+                                 "fetch requires a URL string argument");
+  }
+
+  NativeFetchRequest request;
+  request.id = s_nextFetchRequestId.fetch_add(1);
+  request.url = args[0].asString(runtime).utf8(runtime);
+
+  if (count >= 2 && args[1].isObject()) {
+    auto init = args[1].asObject(runtime);
+
+    if (init.hasProperty(runtime, "method")) {
+      auto methodValue = init.getProperty(runtime, "method");
+      if (!methodValue.isUndefined() && !methodValue.isNull()) {
+        request.method = methodValue.toString(runtime).utf8(runtime);
+        for (auto &ch : request.method) {
+          ch = std::toupper(static_cast<unsigned char>(ch));
+        }
+      }
+    }
+
+    if (init.hasProperty(runtime, "headers")) {
+      auto headersValue = init.getProperty(runtime, "headers");
+      if (headersValue.isObject()) {
+        auto headersObj = headersValue.asObject(runtime);
+        if (headersObj.isArray(runtime)) {
+          size_t length = 0;
+          auto lengthValue = headersObj.getProperty(runtime, "length");
+          if (lengthValue.isNumber()) {
+            length = static_cast<size_t>(lengthValue.asNumber());
+          }
+          for (size_t i = 0; i < length; ++i) {
+            auto entryValue =
+                headersObj.getProperty(runtime, std::to_string(i).c_str());
+            if (!entryValue.isObject()) {
+              continue;
+            }
+            auto entryObj = entryValue.asObject(runtime);
+            if (!entryObj.isArray(runtime)) {
+              continue;
+            }
+            std::string key;
+            std::string value;
+            auto keyValue = entryObj.getProperty(runtime, "0");
+            if (!keyValue.isUndefined()) {
+              key = keyValue.toString(runtime).utf8(runtime);
+            }
+            auto valueValue = entryObj.getProperty(runtime, "1");
+            if (!valueValue.isUndefined()) {
+              value = valueValue.toString(runtime).utf8(runtime);
+            }
+            if (!key.empty()) {
+              request.headers.emplace_back(std::move(key), std::move(value));
+            }
+          }
+        } else {
+          auto propertyNames = headersObj.getPropertyNames(runtime);
+          size_t length = propertyNames.size(runtime);
+          for (size_t i = 0; i < length; ++i) {
+            auto keyValue = propertyNames.getValueAtIndex(runtime, i);
+            std::string key = keyValue.toString(runtime).utf8(runtime);
+            auto propValue = headersObj.getProperty(runtime, key.c_str());
+            std::string value = propValue.toString(runtime).utf8(runtime);
+            request.headers.emplace_back(std::move(key), std::move(value));
+          }
+        }
+      }
+    }
+
+    if (init.hasProperty(runtime, "body")) {
+      auto bodyValue = init.getProperty(runtime, "body");
+      if (!bodyValue.isUndefined() && !bodyValue.isNull()) {
+        request.body = bodyValue.toString(runtime).utf8(runtime);
+        request.hasBody = true;
+      }
+    }
+
+    if (init.hasProperty(runtime, "timeout")) {
+      auto timeoutValue = init.getProperty(runtime, "timeout");
+      if (timeoutValue.isNumber()) {
+        double timeoutDouble = timeoutValue.asNumber();
+        if (std::isfinite(timeoutDouble) && timeoutDouble >= 0) {
+          request.timeoutMs = static_cast<long>(timeoutDouble);
+        }
+      }
+    }
+
+    if (init.hasProperty(runtime, "redirect")) {
+      auto redirectValue = init.getProperty(runtime, "redirect");
+      if (redirectValue.isString()) {
+        auto redirectStr = redirectValue.asString(runtime).utf8(runtime);
+        if (redirectStr == "manual") {
+          request.followRedirects = false;
+        }
+      }
+    }
+  }
+
+  int requestId = request.id;
+  std::thread(performFetchRequest, std::move(request)).detach();
+  return facebook::jsi::Value(requestId);
+}
 
   void imgui_register_embedded_image(const char *name,
                                      const unsigned char *data,
@@ -342,6 +804,7 @@ static void app_cleanup() {
   simgui_shutdown();
   sdtx_shutdown();
   sg_shutdown();
+  curl_global_cleanup();
 
   delete s_hermesApp;
   s_hermesApp = nullptr;
@@ -403,6 +866,10 @@ static void update_performance_metrics() {
 static void app_frame() {
   uint64_t now = stm_now();
   double curTimeMs = stm_ms(now);
+
+  if (s_hermesApp && s_hermesApp->hermes) {
+    processFetchResults(s_hermesApp->hermes);
+  }
 
   maybe_handle_hot_reload();
 
@@ -637,6 +1104,10 @@ extern "C" SHUnit *sh_export_imgui(void);
 sapp_desc sokol_main(int argc, char *argv[]) {
   // Initialize Sokol time before anything else
   stm_setup();
+  if (curl_global_init(CURL_GLOBAL_DEFAULT) != 0) {
+    printf("Failed to initialize libcurl\n");
+    exit(1);
+  }
   // Enable microtask queue for Promise support
   auto runtimeConfig = ::hermes::vm::RuntimeConfig::Builder()
                            .withMicrotaskQueue(true)
@@ -666,6 +1137,12 @@ sapp_desc sokol_main(int argc, char *argv[]) {
     s_hermesApp =
         new HermesApp(shr, helpers.getPropertyAsFunction(*hermes, "peek"),
                       helpers.getPropertyAsFunction(*hermes, "run"));
+
+  auto nativeFetchFn = facebook::jsi::Function::createFromHostFunction(
+    *hermes,
+    facebook::jsi::PropNameID::forAscii(*hermes, "__nativeFetch"), 2,
+    nativeFetchStart);
+  hermes->global().setProperty(*hermes, "__nativeFetch", nativeFetchFn);
 
     // Initialize jslib's current time
     double curTimeMs = stm_ms(stm_now());
@@ -720,6 +1197,7 @@ sapp_desc sokol_main(int argc, char *argv[]) {
   }
 
   _sh_done(shr);
+  curl_global_cleanup();
   exit(1);
 }
 

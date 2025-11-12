@@ -2,10 +2,12 @@
 # SPDX-License-Identifier: MIT
 # See LICENSE file for full license text
 
+find_package(CURL REQUIRED)
+
 add_library(imgui-runtime imgui-runtime.cpp
-        MappedFileBuffer.cpp
-        MappedFileBuffer.h
-        imgui-runtime.h
+    MappedFileBuffer.cpp
+    MappedFileBuffer.h
+    imgui-runtime.h
 )
 target_compile_features(imgui-runtime PUBLIC cxx_std_17)
 target_link_directories(imgui-runtime INTERFACE
@@ -18,6 +20,7 @@ target_link_libraries(imgui-runtime
     $<$<CONFIG:Release>:hermesvm_a jsi boost_context>
     $<$<CONFIG:Debug>:hermesvm>
     $<$<PLATFORM_ID:Linux>:icuuc icui18n icudata>
+    CURL::libcurl
 )
 target_include_directories(imgui-runtime
     PUBLIC
