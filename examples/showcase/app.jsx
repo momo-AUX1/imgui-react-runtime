@@ -14,16 +14,59 @@ import {
   Button,
   Separator,
   Group,
-  Indent,
-  CollapsingHeader,
+  StyleSheet,
+  Tree,
+  TreeNode,
+  TabBar,
+  TabItem,
+  ListBox,
+  InputText,
+  InputTextMultiline,
+  InputFloat,
+  InputInt,
+  InputDouble,
+  Tooltip,
+  PopupModal,
 } from 'react-imgui';
 import { StockTable } from './StockTable.jsx';
 import { BouncingBall } from './BouncingBall.jsx';
 import { ControlledWindow } from './ControlledWindow.jsx';
 
+const styles = StyleSheet.create({
+  statusGlow: { color: '#7DF9FF' },
+  sectionTitle: { color: '#FFD369' },
+  cautionText: { color: '#FF9F43' },
+  pillButton: { backgroundColor: '#2F2963', color: '#F4F4F4', width: 140 },
+  noteHeader: { color: '#A29BFE' },
+  noteBody: { color: '#EAEAEA' },
+});
+
+const accentPalettes = [
+  { name: 'Neon Pulse', primary: '#08F7FE', secondary: '#FE53BB', text: '#F5D300' },
+  { name: 'Aurora Mist', primary: '#7CF9A6', secondary: '#70A1FF', text: '#FAD6FF' },
+  { name: 'Solar Ember', primary: '#FFB347', secondary: '#FF416C', text: '#FFF5E1' },
+];
+
 export function App() {
   const [counter1, setCounter1] = useState(0);
   const [counter2, setCounter2] = useState(0);
+  const [activeTab, setActiveTab] = useState('inputs');
+  const [paletteIndex, setPaletteIndex] = useState(0);
+  const [displayName, setDisplayName] = useState('Explorer');
+  const [notes, setNotes] = useState('The runtime now speaks fluent ImGui.\nTry the new widgets and styling helpers!');
+  const [exposure, setExposure] = useState(1.25);
+  const [sampleCount, setSampleCount] = useState(64);
+  const [budget, setBudget] = useState(4200.5);
+  const [showAboutModal, setShowAboutModal] = useState(false);
+
+  const palette = accentPalettes[paletteIndex] || accentPalettes[0];
+  const accentButtonStyle = StyleSheet.compose(styles.pillButton, {
+    backgroundColor: palette.primary,
+    color: '#1B1B1B',
+  });
+  const accentTextStyle = { color: palette.text };
+  const secondaryTextStyle = { color: palette.secondary };
+  const paletteItems = accentPalettes.map((item) => item.name);
 
   console.debug('App rendering, counter1 =', counter1, 'counter2 =', counter2);
 
@@ -37,11 +80,11 @@ export function App() {
 
       {/* Status bar at the top */}
       <Rect x={0} y={0} width={1200} height={25} color="#00000080" filled={true} />
-      <Text color="#00FF00">React + ImGui Showcase</Text>
-      <SameLine />
-      <Text color="#FFFF00">  |  Counters: {counter1} / {counter2}</Text>
-      <SameLine />
-      <Text color="#00FFFF">  |  Total clicks: {counter1 + counter2}</Text>
+    <Text style={styles.statusGlow}>React + ImGui Showcase</Text>
+    <SameLine />
+    <Text style={accentTextStyle}>  |  Counters: {counter1} / {counter2}</Text>
+    <SameLine />
+    <Text style={secondaryTextStyle}>  |  Total clicks: {counter1 + counter2}</Text>
 
       {/* All the existing windows */}
       <BouncingBall />
@@ -62,78 +105,141 @@ export function App() {
       </Window>
 
       <Window title="Component Playground" defaultX={650} defaultY={40}>
-        <Text color="#00FFFF">Welcome to the React + ImGui demo!</Text>
+        <Text style={accentTextStyle}>Welcome to the React + ImGui demo!</Text>
+        <Text style={secondaryTextStyle}>Palette: {palette.name}</Text>
+
+        <Separator />
+
+        <TabBar id="component-playground-tabs">
+          <TabItem
+            label="Inputs"
+            id="inputs"
+            selected={activeTab === 'inputs'}
+            onSelect={() => setActiveTab('inputs')}
+          >
+            {activeTab === 'inputs' && (
+              <>
+                <Text style={styles.sectionTitle}>Editable Controls</Text>
+                <InputText label="Display name" value={displayName} onChange={(value) => setDisplayName(value)} />
+                <InputTextMultiline
+                  label="Session notes"
+                  value={notes}
+                  onChange={(value) => setNotes(value)}
+                  width={320}
+                  height={100}
+                />
+                <InputFloat
+                  label="Exposure"
+                  value={exposure}
+                  step={0.05}
+                  onChange={(value) => setExposure(value)}
+                />
+                <InputInt
+                  label="Sample count"
+                  value={sampleCount}
+                  step={1}
+                  onChange={(value) => setSampleCount(value)}
+                />
+                <InputDouble
+                  label="Frame budget (ms)"
+                  value={budget}
+                  step={0.5}
+                  onChange={(value) => setBudget(value)}
+                />
+                <Text style={styles.statusGlow}>
+                  Preview: {displayName} • {sampleCount} samples • {exposure.toFixed(2)}x exposure • {budget.toFixed(1)} ms budget
+                </Text>
+              </>
+            )}
+          </TabItem>
+          <TabItem
+            label="Data & Hierarchy"
+            id="data"
+            selected={activeTab === 'data'}
+            onSelect={() => setActiveTab('data')}
+          >
+            {activeTab === 'data' && (
+              <>
+                <Group>
+                  <Text style={styles.sectionTitle}>Palette Presets</Text>
+                  <ListBox
+                    label="Accent palette"
+                    items={paletteItems}
+                    selectedIndex={paletteIndex}
+                    heightInItems={3}
+                    onChange={(index) => setPaletteIndex(index)}
+                  />
+                  <Text style={accentTextStyle}>Primary color: {palette.primary}</Text>
+                  <Text style={secondaryTextStyle}>Secondary color: {palette.secondary}</Text>
+                </Group>
+                <Separator />
+                <Tree label="Runtime Layout" defaultOpen>
+                  <TreeNode label="Windows" defaultOpen>
+                    <Text>- Hello from React</Text>
+                    <Text>- Component Playground</Text>
+                    <Text>- Controlled Window</Text>
+                  </TreeNode>
+                  <TreeNode label="Decorations">
+                    <Text>- Background Rectangles</Text>
+                    <Text>- Status Bar Overlay</Text>
+                    <Text>- Floating Circles</Text>
+                  </TreeNode>
+                  <TreeNode label="Demo Nodes">
+                    <Text>- Palette Switcher</Text>
+                    <Text>- Input Suite</Text>
+                  </TreeNode>
+                </Tree>
+              </>
+            )}
+          </TabItem>
+          <TabItem
+            label="Insights"
+            id="insights"
+            selected={activeTab === 'insights'}
+            onSelect={() => setActiveTab('insights')}
+          >
+            {activeTab === 'insights' && (
+              <>
+                <Text style={styles.sectionTitle}>Counter Telemetry</Text>
+                <Text style={styles.statusGlow}>
+                  Counter1: {counter1} • Counter2: {counter2} • Total: {counter1 + counter2}
+                </Text>
+                <Text style={counter2 > 25 ? styles.cautionText : accentTextStyle}>
+                  {counter2 > 25 ? 'Warning: stress testing the counter!' : 'Counters are within nominal range.'}
+                </Text>
+                <Separator />
+                <Text style={styles.noteHeader}>Notes</Text>
+                <Text style={styles.noteBody}>{notes}</Text>
+              </>
+            )}
+          </TabItem>
+        </TabBar>
 
         <Separator />
 
         <Group>
-          <Text color="#FFFF00">Counter Demo:</Text>
-          <Button onClick={() => setCounter2(counter2 + 1)}>
-            Increment
+          <Button style={accentButtonStyle} onClick={() => setShowAboutModal(true)}>
+            Styled Action
           </Button>
+          <Tooltip followItem>
+            <Text>Opens a themed PopupModal using StyleSheet colors.</Text>
+          </Tooltip>
           <SameLine />
-          <Button onClick={() => setCounter2(counter2 - 1)}>
-            Decrement
-          </Button>
+          <Button onClick={() => setCounter2(counter2 + 1)}>+1</Button>
           <SameLine />
-          <Button onClick={() => setCounter2(0)}>
-            Reset
-          </Button>
-          <Text color={counter2 === 0 ? "#888888" : "#FFFFFF"}>
-            Current value: {counter2}
-          </Text>
+          <Button onClick={() => setCounter2(Math.max(0, counter2 - 1))}>-1</Button>
+          <SameLine />
+          <Button onClick={() => setCounter2(0)}>Reset</Button>
         </Group>
-
-        <Separator />
-
-        <Group>
-          <Text color="#FFFF00">Quick Math:</Text>
-          <Indent>
-            <Text color="#00FF00">Counter x 2 = {counter2 * 2}</Text>
-            <Text color="#00FF00">Counter squared = {counter2 * counter2}</Text>
-            <Text color="#00FFFF">Counter is {counter2 % 2 === 0 ? 'EVEN' : 'ODD'}</Text>
-          </Indent>
-        </Group>
-
-        <Separator />
-
-        <Group>
-          <Text color="#FFFF00">Status Indicators:</Text>
-          <Indent>
-            <Text color={counter2 > 10 ? "#FF4444" : "#4444FF"}>
-              {counter2 > 10 ? '[HOT] Counter is high!' : '[COOL] Counter is low'}
-            </Text>
-            <Text color={counter2 < 0 ? "#FFAA00" : "#00FF00"}>
-              {counter2 < 0 ? '[WARN] Negative territory!' : '[OK] Positive vibes'}
-            </Text>
-          </Indent>
-        </Group>
-
-        <Separator />
-
-        <CollapsingHeader title="Architecture Info">
-          <Text>React 19.2.0 with custom reconciler</Text>
-          <Text>Static Hermes (typed + untyped units)</Text>
-          <Text>Zero-overhead FFI to DearImGui</Text>
-          <Text>Event loop with setTimeout/Promises</Text>
-          <Text color="#FF00FF">Root component for fullscreen canvas!</Text>
-        </CollapsingHeader>
-
-        <Separator />
-
-        <Text>Quick Actions:</Text>
-        <Button onClick={() => setCounter2(Math.floor(Math.random() * 100))}>
-          Random (0-99)
-        </Button>
-        <SameLine />
-        <Button onClick={() => setCounter2(counter2 + 10)}>
-          +10
-        </Button>
-        <SameLine />
-        <Button onClick={() => setCounter2(counter2 - 10)}>
-          -10
-        </Button>
       </Window>
+
+      <PopupModal id="about-modal" open={showAboutModal} onClose={() => setShowAboutModal(false)}>
+        <Text style={styles.sectionTitle}>About this Showcase</Text>
+        <Separator />
+        <Text style={styles.noteBody}>This popup highlights the new PopupModal primitive with StyleSheet-driven styling.</Text>
+        <Text style={styles.statusGlow}>Active palette: {palette.name}</Text>
+        <Button onClick={() => setShowAboutModal(false)}>Close</Button>
+      </PopupModal>
 
       {/* Footer info bar */}
       <Rect x={0} y={575} width={1200} height={25} color="#00000080" filled={true} />

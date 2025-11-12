@@ -14,6 +14,14 @@ export interface ImguiStyle {
   backgroundColor?: ImColor;
   width?: number;
   height?: number;
+  minWidth?: number;
+  minHeight?: number;
+  padding?: number | { x?: number; y?: number } | [number, number];
+  paddingHorizontal?: number;
+  paddingVertical?: number;
+  borderRadius?: number;
+  font?: string | number;
+  fontScale?: number;
 }
 
 export type StyleProp<T> = T | T[] | null | undefined;
@@ -117,7 +125,22 @@ export interface WindowProps {
   noNavInputs?: boolean;
   noNavFocus?: boolean;
   unsavedDocument?: boolean;
+  dockId?: number;
+  dockCond?: number;
+  backgroundAlpha?: number;
+  rounding?: number;
+  taskbarVisible?: boolean;
+  closeButton?: boolean;
+  fontScale?: number;
   onWindowState?: (x: number, y: number, width: number, height: number) => void;
+  onClose?: () => void;
+  children?: ReactNode;
+}
+
+export interface DemoWindowProps {
+  open?: boolean;
+  defaultOpen?: boolean;
+  onChange?: (open: boolean) => void;
   onClose?: () => void;
   children?: ReactNode;
 }
@@ -145,6 +168,35 @@ export interface MenuItemProps {
   toggle?: boolean;
   onSelect?: (selected?: boolean) => void;
   onChange?: (selected: boolean) => void;
+  children?: ReactNode;
+}
+
+export interface TreeProps {
+  label?: string;
+  id?: string;
+  open?: boolean;
+  defaultOpen?: boolean;
+  flags?: number;
+  onToggle?: (open: boolean) => void;
+  children?: ReactNode;
+}
+
+export interface TreeNodeProps extends TreeProps {}
+
+export interface TabBarProps {
+  id?: string;
+  flags?: number;
+  children?: ReactNode;
+}
+
+export interface TabItemProps {
+  label?: string;
+  id?: string;
+  selected?: boolean;
+  defaultSelected?: boolean;
+  flags?: number;
+  onSelect?: () => void;
+  onClose?: () => void;
   children?: ReactNode;
 }
 
@@ -296,6 +348,18 @@ export interface InputTextProps {
   children?: ReactNode;
 }
 
+export interface InputTextMultilineProps {
+  label?: string;
+  value?: string;
+  defaultValue?: string;
+  maxLength?: number;
+  width?: number;
+  height?: number;
+  flags?: number;
+  onChange?: (value: string) => void;
+  children?: ReactNode;
+}
+
 export interface InputFloatProps {
   label?: string;
   value?: number;
@@ -315,6 +379,29 @@ export interface InputIntProps {
   stepFast?: number;
   flags?: number;
   onChange?: (value: number) => void;
+}
+
+export interface InputDoubleProps {
+  label?: string;
+  value?: number;
+  defaultValue?: number;
+  step?: number;
+  stepFast?: number;
+  format?: string;
+  flags?: number;
+  onChange?: (value: number) => void;
+}
+
+export interface InputScalarProps {
+  label?: string;
+  dataType: number;
+  value?: bigint | number;
+  defaultValue?: bigint | number;
+  step?: bigint | number;
+  fastStep?: bigint | number;
+  format?: string;
+  flags?: number;
+  onChange?: (value: bigint | number) => void;
 }
 
 export interface DragFloatProps {
@@ -347,6 +434,17 @@ export interface ComboProps {
   selectedIndex?: number;
   defaultIndex?: number;
   maxHeightItems?: number;
+  onChange?: (index: number, item: string) => void;
+}
+
+export interface ListBoxProps {
+  label?: string;
+  items: string[];
+  selectedIndex?: number;
+  defaultIndex?: number;
+  heightInItems?: number;
+  width?: number;
+  height?: number;
   onChange?: (index: number, item: string) => void;
 }
 
@@ -398,6 +496,62 @@ export interface ColorButtonProps {
   onClick?: () => void;
 }
 
+export interface ImageProps {
+  textureId: number;
+  width: number;
+  height: number;
+  uv0?: { x: number; y: number };
+  uv1?: { x: number; y: number };
+  tintColor?: ImColor;
+  borderColor?: ImColor;
+  children?: ReactNode;
+}
+
+export interface ImageButtonProps extends ImageProps {
+  id: string;
+  backgroundColor?: ImColor;
+  onClick?: () => void;
+}
+
+export interface PlotLinesProps {
+  label?: string;
+  values: number[];
+  scaleMin?: number;
+  scaleMax?: number;
+  stride?: number;
+  overlay?: string;
+  width?: number;
+  height?: number;
+}
+
+export interface PlotHistogramProps extends PlotLinesProps {}
+
+export interface TooltipProps {
+  open?: boolean;
+  followItem?: boolean;
+  children?: ReactNode;
+}
+
+export interface PopupProps {
+  id: string;
+  open?: boolean;
+  defaultOpen?: boolean;
+  flags?: number;
+  onClose?: () => void;
+  children?: ReactNode;
+}
+
+export interface PopupModalProps extends PopupProps {}
+
+export interface DockSpaceProps {
+  id?: number;
+  size?: { x: number; y: number };
+  flags?: number;
+  passthroughCentralNode?: boolean;
+  useViewport?: boolean;
+  children?: ReactNode;
+}
+
 export interface NavigationState {
   keyboard: boolean;
   gamepad: boolean;
@@ -424,11 +578,16 @@ export interface ReactImguiRoot {
 
 export declare const Root: (props: RootProps) => JSX.Element;
 export declare const Window: (props: WindowProps) => JSX.Element;
+export declare const DemoWindow: (props: DemoWindowProps) => JSX.Element;
 export declare const ChildWindow: (props: ChildWindowProps) => JSX.Element;
 export declare const MainMenuBar: (props: MainMenuBarProps) => JSX.Element;
 export declare const MenuBar: (props: MenuBarProps) => JSX.Element;
 export declare const Menu: (props: MenuProps) => JSX.Element;
 export declare const MenuItem: (props: MenuItemProps) => JSX.Element;
+export declare const Tree: (props: TreeProps) => JSX.Element;
+export declare const TreeNode: (props: TreeNodeProps) => JSX.Element;
+export declare const TabBar: (props: TabBarProps) => JSX.Element;
+export declare const TabItem: (props: TabItemProps) => JSX.Element;
 export declare const Button: (props: ButtonProps) => JSX.Element;
 export declare const Text: (props: TextProps) => JSX.Element;
 export declare const Group: (props: GroupProps) => JSX.Element;
@@ -442,6 +601,46 @@ export declare const TableRow: (props: TableRowProps) => JSX.Element;
 export declare const TableCell: (props: TableCellProps) => JSX.Element;
 export declare const TableColumn: (props: TableColumnProps) => JSX.Element;
 export declare const Rect: (props: RectProps) => JSX.Element;
+export declare const Circle: (props: CircleProps) => JSX.Element;
+export declare const Checkbox: (props: CheckboxProps) => JSX.Element;
+export declare const SliderFloat: (props: SliderFloatProps) => JSX.Element;
+export declare const SliderInt: (props: SliderIntProps) => JSX.Element;
+export declare const ProgressBar: (props: ProgressBarProps) => JSX.Element;
+export declare const Spacing: (props: SpacingProps) => JSX.Element;
+export declare const InputText: (props: InputTextProps) => JSX.Element;
+export declare const InputTextMultiline: (props: InputTextMultilineProps) => JSX.Element;
+export declare const InputFloat: (props: InputFloatProps) => JSX.Element;
+export declare const InputInt: (props: InputIntProps) => JSX.Element;
+export declare const InputDouble: (props: InputDoubleProps) => JSX.Element;
+export declare const InputScalar: (props: InputScalarProps) => JSX.Element;
+export declare const DragFloat: (props: DragFloatProps) => JSX.Element;
+export declare const DragInt: (props: DragIntProps) => JSX.Element;
+export declare const Combo: (props: ComboProps) => JSX.Element;
+export declare const ListBox: (props: ListBoxProps) => JSX.Element;
+export declare const Selectable: (props: SelectableProps) => JSX.Element;
+export declare const RadioButton: (props: RadioButtonProps) => JSX.Element;
+export declare const ColorEdit3: (props: ColorEdit3Props) => JSX.Element;
+export declare const ColorEdit4: (props: ColorEdit4Props) => JSX.Element;
+export declare const ColorButton: (props: ColorButtonProps) => JSX.Element;
+export declare const Image: (props: ImageProps) => JSX.Element;
+export declare const ImageButton: (props: ImageButtonProps) => JSX.Element;
+export declare const PlotLines: (props: PlotLinesProps) => JSX.Element;
+export declare const PlotHistogram: (props: PlotHistogramProps) => JSX.Element;
+export declare const Tooltip: (props: TooltipProps) => JSX.Element;
+export declare const Popup: (props: PopupProps) => JSX.Element;
+export declare const PopupModal: (props: PopupModalProps) => JSX.Element;
+export declare const DockSpace: (props: DockSpaceProps) => JSX.Element;
+export declare const Platform: PlatformModule;
+export declare const Dimensions: DimensionsModule;
+export declare const Navigation: NavigationModule;
+export declare const StyleSheet: StyleSheetStatic;
+
+export declare function createRoot(): ReactImguiRoot;
+export declare function render(element: ReactElement, root: ReactImguiRoot): Promise<ReactImguiRoot['container']>;
+export declare function useWindowDimensions(): DimensionMetrics;
+export declare function batchedUpdates<A extends any[], R>(fn: (...args: A) => R, ...args: A): R;
+export declare function discreteUpdates<A extends any[], R>(fn: (...args: A) => R, ...args: A): R;
+export declare function flushSync<R>(fn: () => R): R;
 export declare const Circle: (props: CircleProps) => JSX.Element;
 export declare const Checkbox: (props: CheckboxProps) => JSX.Element;
 export declare const SliderFloat: (props: SliderFloatProps) => JSX.Element;
