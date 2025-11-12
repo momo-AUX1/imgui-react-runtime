@@ -77,6 +77,7 @@ const projectPackageRoot = findPackageRoot(entryDir);
 const alias = {
   'react-imgui-reconciler': libDir,
   'react-imgui': runtimeDir,
+  buffer: resolve(__dirname, '../lib/jslib-unit/node-buffer.js'),
 };
 
 const reactAliasRoots = [];

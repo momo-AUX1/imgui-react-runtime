@@ -26,6 +26,13 @@
 #include <cmath>
 #include <climits>
 #include <filesystem>
+#include <fstream>
+#include <array>
+#include <cstdint>
+#include <algorithm>
+#include <memory>
+#include <cstring>
+#include <stdexcept>
 #include <mutex>
 #include <queue>
 #include <thread>
@@ -36,8 +43,24 @@
 #include <string_view>
 #include <unordered_map>
 #include <vector>
+#include <chrono>
+#include <cstdlib>
+#include <sstream>
+#include <system_error>
+
+#if !defined(_WIN32)
+#include <sys/utsname.h>
+#include <unistd.h>
+#endif
 
 #include <curl/curl.h>
+
+namespace fs = std::filesystem;
+
+#if defined(__APPLE__) || defined(__linux__) || defined(__unix__) ||          \
+  defined(__EMSCRIPTEN__) || defined(__ANDROID__)
+extern char **environ;
+#endif
 
 // Hermes runtime and event loop management
 class HermesApp {
@@ -64,6 +87,7 @@ static HermesApp *s_hermesApp = nullptr;
 static sg_sampler s_sampler = {};
 static bool s_navKeyboardEnabled = true;
 static bool s_navGamepadEnabled = true;
+static double s_runtimeStartMs = 0.0;
 
 static void apply_navigation_config() {
   if (ImGui::GetCurrentContext() == nullptr) {
@@ -223,7 +247,8 @@ static PlatformInfo detect_platform_info() {
   return info;
 }
 
-static void push_platform_info_to_js(facebook::hermes::HermesRuntime *hermes) {
+static void push_platform_info_to_js(facebook::hermes::HermesRuntime *hermes,
+                                     const PlatformInfo &info) {
   if (!hermes) {
     return;
   }
@@ -233,8 +258,6 @@ static void push_platform_info_to_js(facebook::hermes::HermesRuntime *hermes) {
     if (!global.hasProperty(*hermes, "__setPlatformInfo")) {
       return;
     }
-
-    PlatformInfo info = detect_platform_info();
 
     facebook::jsi::Object payload(*hermes);
     payload.setProperty(
@@ -425,6 +448,952 @@ static std::string base64Encode(const std::vector<unsigned char> &input) {
 
   return encoded;
 }
+
+static std::vector<unsigned char>
+base64Decode(const std::string &input) {
+  if (input.empty()) {
+    return {};
+  }
+
+    static const std::array<int, 256> kDecodeTable = []() {
+      std::array<int, 256> table{};
+      table.fill(-1);
+      for (int i = 0; i < 64; ++i) {
+        table[static_cast<unsigned char>(kBase64Alphabet[i])] = i;
+      }
+      table[static_cast<unsigned char>('=')] = 0;
+      return table;
+    }();
+
+  std::vector<unsigned char> output;
+  output.reserve((input.size() * 3) / 4);
+
+  int accumulator = 0;
+  int bits = 0;
+  int padding = 0;
+
+  for (unsigned char ch : input) {
+    if (ch == '=') {
+      ++padding;
+      accumulator <<= 6;
+      bits += 6;
+    } else {
+  int value = kDecodeTable[static_cast<unsigned char>(ch)];
+      if (value < 0) {
+        if (ch == '\r' || ch == '\n' || ch == ' ' || ch == '\t') {
+          continue;
+        }
+        throw std::runtime_error("Invalid base64 input");
+      }
+      accumulator = (accumulator << 6) | value;
+      bits += 6;
+    }
+
+    if (bits >= 8) {
+      bits -= 8;
+      unsigned char byte = static_cast<unsigned char>((accumulator >> bits) & 0xFF);
+      output.push_back(byte);
+    }
+  }
+
+  if (padding) {
+    if (static_cast<size_t>(padding) > output.size()) {
+      throw std::runtime_error("Invalid base64 padding");
+    }
+    output.resize(output.size() - padding);
+  }
+
+  return output;
+}
+
+namespace nodecompat {
+
+enum class FsEntryType : int {
+  None = 0,
+  File = 1,
+  Directory = 2,
+  Symlink = 3,
+  Other = 4
+};
+
+static double fileTimeToMilliseconds(const fs::file_time_type &timePoint) {
+  using namespace std::chrono;
+  if (timePoint == fs::file_time_type::min()) {
+    return 0.0;
+  }
+
+  auto systemNow = system_clock::now();
+  auto adjusted = timePoint - fs::file_time_type::clock::now() + systemNow;
+  auto millis = time_point_cast<milliseconds>(adjusted);
+  return static_cast<double>(millis.time_since_epoch().count());
+}
+
+struct StatInfo {
+  FsEntryType type = FsEntryType::None;
+  bool exists = false;
+  uintmax_t size = 0;
+  double mtimeMs = 0.0;
+  double ctimeMs = 0.0;
+  uint32_t mode = 0;
+};
+
+static StatInfo getStatInfo(const fs::path &target, bool followSymlinks) {
+  StatInfo info;
+  std::error_code ec;
+  auto status = followSymlinks ? fs::status(target, ec)
+                               : fs::symlink_status(target, ec);
+  if (ec) {
+    return info;
+  }
+
+  info.exists = fs::exists(status);
+  if (!info.exists) {
+    return info;
+  }
+
+  if (fs::is_regular_file(status)) {
+    info.type = FsEntryType::File;
+  } else if (fs::is_directory(status)) {
+    info.type = FsEntryType::Directory;
+  } else if (fs::is_symlink(status)) {
+    info.type = FsEntryType::Symlink;
+  } else {
+    info.type = FsEntryType::Other;
+  }
+
+  if (info.type == FsEntryType::File) {
+    info.size = fs::file_size(target, ec);
+    if (ec) {
+      info.size = 0;
+    }
+  }
+
+  auto mtime = fs::last_write_time(target, ec);
+  if (!ec) {
+    info.mtimeMs = fileTimeToMilliseconds(mtime);
+  }
+  info.ctimeMs = info.mtimeMs;
+
+  info.mode = static_cast<uint32_t>(status.permissions());
+  return info;
+}
+
+static std::vector<unsigned char> readFileBytes(const fs::path &target) {
+  std::ifstream stream(target, std::ios::binary);
+  if (!stream) {
+    throw std::runtime_error("Failed to open file for reading: " +
+                             target.string());
+  }
+
+  stream.seekg(0, std::ios::end);
+  std::streampos length = stream.tellg();
+  if (length < 0) {
+    throw std::runtime_error("Failed to determine file size: " +
+                             target.string());
+  }
+
+  std::vector<unsigned char> data(static_cast<size_t>(length));
+  stream.seekg(0, std::ios::beg);
+  if (length > 0) {
+    stream.read(reinterpret_cast<char *>(data.data()), length);
+    if (!stream) {
+      throw std::runtime_error("Failed to read file: " + target.string());
+    }
+  }
+
+  return data;
+}
+
+static void writeFileBytes(const fs::path &target,
+                           const std::vector<unsigned char> &bytes,
+                           bool append) {
+  auto mode = std::ios::binary | (append ? std::ios::app : std::ios::trunc);
+  std::ofstream stream(target, mode);
+  if (!stream) {
+    throw std::runtime_error("Failed to open file for writing: " +
+                             target.string());
+  }
+
+  if (!bytes.empty()) {
+    stream.write(reinterpret_cast<const char *>(bytes.data()),
+                 static_cast<std::streamsize>(bytes.size()));
+  }
+
+  if (!stream) {
+    throw std::runtime_error("Failed to write file: " + target.string());
+  }
+}
+
+static std::string detectArchitecture() {
+#if defined(__EMSCRIPTEN__)
+  return "wasm32";
+#elif defined(__aarch64__) || defined(_M_ARM64)
+  return "arm64";
+#elif defined(__arm__) || defined(_M_ARM)
+  return "arm";
+#elif defined(__x86_64__) || defined(_M_X64)
+  return "x64";
+#elif defined(__i386__) || defined(_M_IX86)
+  return "ia32";
+#else
+  return "unknown";
+#endif
+}
+
+static std::string getTempDirectory() {
+  std::error_code ec;
+  auto path = fs::temp_directory_path(ec);
+  if (ec) {
+    return {};
+  }
+  return path.string();
+}
+
+static std::string getHomeDirectory() {
+#if defined(_WIN32)
+  const char *home = std::getenv("USERPROFILE");
+  if (home && home[0]) {
+    return home;
+  }
+  const char *drive = std::getenv("HOMEDRIVE");
+  const char *path = std::getenv("HOMEPATH");
+  if (drive && path) {
+    return std::string(drive) + path;
+  }
+  return {};
+#else
+  const char *home = std::getenv("HOME");
+  if (home && home[0]) {
+    return home;
+  }
+  return {};
+#endif
+}
+
+static std::string getHostName() {
+#if defined(_WIN32)
+  return {};
+#else
+  char buffer[256];
+  if (gethostname(buffer, sizeof(buffer)) == 0) {
+    buffer[sizeof(buffer) - 1] = '\0';
+    return buffer;
+  }
+  return {};
+#endif
+}
+
+static std::string getOsRelease() {
+#if defined(__unix__) || defined(__APPLE__) || defined(__EMSCRIPTEN__) ||    \
+    defined(__ANDROID__)
+  struct utsname name {};
+  if (uname(&name) == 0) {
+    return name.release;
+  }
+  return {};
+#else
+  return {};
+#endif
+}
+
+static std::string getEndianness() {
+  uint16_t value = 0x0102;
+  unsigned char first =
+      *reinterpret_cast<unsigned char *>(static_cast<void *>(&value));
+  return first == 0x01 ? "BE" : "LE";
+}
+
+static double getTotalMemory() {
+#if defined(_SC_PHYS_PAGES) && defined(_SC_PAGE_SIZE)
+  long pages = sysconf(_SC_PHYS_PAGES);
+  long pageSize = sysconf(_SC_PAGE_SIZE);
+  if (pages > 0 && pageSize > 0) {
+    return static_cast<double>(pages) * static_cast<double>(pageSize);
+  }
+#endif
+  return 0.0;
+}
+
+static double getFreeMemory() {
+#if defined(_SC_AVPHYS_PAGES) && defined(_SC_PAGE_SIZE)
+  long pages = sysconf(_SC_AVPHYS_PAGES);
+  long pageSize = sysconf(_SC_PAGE_SIZE);
+  if (pages > 0 && pageSize > 0) {
+    return static_cast<double>(pages) * static_cast<double>(pageSize);
+  }
+#endif
+  return 0.0;
+}
+
+static std::string getUserName() {
+#if defined(_WIN32)
+  const char *user = std::getenv("USERNAME");
+#else
+  const char *user = std::getenv("USER");
+#endif
+  if (user && user[0]) {
+    return user;
+  }
+  return {};
+}
+
+static std::string getUserShell() {
+#if defined(_WIN32)
+  const char *shell = std::getenv("COMSPEC");
+#else
+  const char *shell = std::getenv("SHELL");
+#endif
+  if (shell && shell[0]) {
+    return shell;
+  }
+  return {};
+}
+
+static std::vector<double> getLoadAverage() { return {0.0, 0.0, 0.0}; }
+
+static double getUptimeSeconds() {
+  if (s_runtimeStartMs <= 0.0) {
+    return 0.0;
+  }
+  double nowMs = stm_ms(stm_now());
+  return std::max(0.0, (nowMs - s_runtimeStartMs) / 1000.0);
+}
+
+static facebook::jsi::Object readEnvironment(facebook::jsi::Runtime &runtime) {
+  facebook::jsi::Object env(runtime);
+
+#if defined(__APPLE__) || defined(__linux__) || defined(__unix__) ||          \
+    defined(__EMSCRIPTEN__) || defined(__ANDROID__)
+  if (!::environ) {
+    return env;
+  }
+  for (char **entry = ::environ; *entry; ++entry) {
+    const char *raw = *entry;
+    const char *separator = std::strchr(raw, '=');
+    if (!separator || separator == raw) {
+      continue;
+    }
+    std::string key(raw, separator - raw);
+    std::string value(separator + 1);
+    env.setProperty(runtime, key.c_str(),
+                    facebook::jsi::String::createFromUtf8(runtime, value));
+  }
+#else
+  const char *pathEnv = std::getenv("PATH");
+  if (pathEnv) {
+    env.setProperty(runtime, "PATH",
+                    facebook::jsi::String::createFromUtf8(runtime, pathEnv));
+  }
+  const char *homeEnv = std::getenv("HOME");
+  if (homeEnv) {
+    env.setProperty(runtime, "HOME",
+                    facebook::jsi::String::createFromUtf8(runtime, homeEnv));
+  }
+#endif
+
+  return env;
+}
+
+static std::string toLowerAscii(std::string value) {
+  for (char &ch : value) {
+    ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+  }
+  return value;
+}
+
+static facebook::jsi::Object makeStatObject(facebook::jsi::Runtime &runtime,
+                      StatInfo info) {
+  auto infoPtr = std::make_shared<StatInfo>(std::move(info));
+  facebook::jsi::Object stat(runtime);
+  auto makePredicate = [&runtime, infoPtr](const char *name,
+                       FsEntryType expected) {
+  auto predicate = [infoPtr, expected](facebook::jsi::Runtime &,
+                     const facebook::jsi::Value &,
+                     const facebook::jsi::Value *,
+                     size_t) -> facebook::jsi::Value {
+    return facebook::jsi::Value(infoPtr->type == expected);
+  };
+  return facebook::jsi::Function::createFromHostFunction(
+    runtime, facebook::jsi::PropNameID::forAscii(runtime, name), 0,
+    predicate);
+  };
+
+  stat.setProperty(runtime, "isFile",
+           makePredicate("isFile", FsEntryType::File));
+  stat.setProperty(runtime, "isDirectory",
+           makePredicate("isDirectory", FsEntryType::Directory));
+  stat.setProperty(runtime, "isSymbolicLink",
+           makePredicate("isSymbolicLink", FsEntryType::Symlink));
+  stat.setProperty(runtime, "size",
+           facebook::jsi::Value(static_cast<double>(infoPtr->size)));
+  stat.setProperty(runtime, "mtimeMs",
+           facebook::jsi::Value(infoPtr->mtimeMs));
+  stat.setProperty(runtime, "ctimeMs",
+           facebook::jsi::Value(infoPtr->ctimeMs));
+  stat.setProperty(runtime, "mode",
+           facebook::jsi::Value(static_cast<double>(infoPtr->mode)));
+  stat.setProperty(runtime, "exists",
+           facebook::jsi::Value(infoPtr->exists));
+  stat.setProperty(runtime, "type",
+           facebook::jsi::Value(static_cast<int>(infoPtr->type)));
+  return stat;
+}
+
+static facebook::jsi::Object makeOsInfo(facebook::jsi::Runtime &runtime,
+                    const PlatformInfo &platform) {
+  facebook::jsi::Object os(runtime);
+  os.setProperty(runtime, "platform",
+         facebook::jsi::String::createFromUtf8(runtime, platform.os));
+  os.setProperty(runtime, "arch",
+         facebook::jsi::String::createFromUtf8(
+           runtime, detectArchitecture()));
+  os.setProperty(runtime, "release",
+         facebook::jsi::String::createFromUtf8(runtime,
+                             getOsRelease()));
+  os.setProperty(runtime, "endianness",
+         facebook::jsi::Function::createFromHostFunction(
+           runtime,
+           facebook::jsi::PropNameID::forAscii(runtime,
+                              "endianness"),
+           0, [](facebook::jsi::Runtime &rt,
+               const facebook::jsi::Value &,
+               const facebook::jsi::Value *,
+               size_t) -> facebook::jsi::Value {
+             return facebook::jsi::String::createFromUtf8(
+               rt, getEndianness());
+           }));
+  os.setProperty(runtime, "totalmem",
+         facebook::jsi::Function::createFromHostFunction(
+           runtime,
+           facebook::jsi::PropNameID::forAscii(runtime, "totalmem"),
+           0, [](facebook::jsi::Runtime &rt,
+               const facebook::jsi::Value &,
+               const facebook::jsi::Value *,
+               size_t) -> facebook::jsi::Value {
+             return facebook::jsi::Value(getTotalMemory());
+           }));
+  os.setProperty(runtime, "freemem",
+         facebook::jsi::Function::createFromHostFunction(
+           runtime,
+           facebook::jsi::PropNameID::forAscii(runtime, "freemem"),
+           0, [](facebook::jsi::Runtime &rt,
+               const facebook::jsi::Value &,
+               const facebook::jsi::Value *,
+               size_t) -> facebook::jsi::Value {
+             return facebook::jsi::Value(getFreeMemory());
+           }));
+  os.setProperty(runtime, "uptime",
+         facebook::jsi::Function::createFromHostFunction(
+           runtime,
+           facebook::jsi::PropNameID::forAscii(runtime, "uptime"),
+           0, [](facebook::jsi::Runtime &rt,
+               const facebook::jsi::Value &,
+               const facebook::jsi::Value *,
+               size_t) -> facebook::jsi::Value {
+             return facebook::jsi::Value(getUptimeSeconds());
+           }));
+  os.setProperty(runtime, "tmpdir",
+         facebook::jsi::Function::createFromHostFunction(
+           runtime,
+           facebook::jsi::PropNameID::forAscii(runtime, "tmpdir"),
+           0, [](facebook::jsi::Runtime &rt,
+               const facebook::jsi::Value &,
+               const facebook::jsi::Value *,
+               size_t) -> facebook::jsi::Value {
+             return facebook::jsi::String::createFromUtf8(
+               rt, getTempDirectory());
+           }));
+  os.setProperty(runtime, "homedir",
+         facebook::jsi::Function::createFromHostFunction(
+           runtime,
+           facebook::jsi::PropNameID::forAscii(runtime, "homedir"),
+           0, [](facebook::jsi::Runtime &rt,
+               const facebook::jsi::Value &,
+               const facebook::jsi::Value *,
+               size_t) -> facebook::jsi::Value {
+             return facebook::jsi::String::createFromUtf8(
+               rt, getHomeDirectory());
+           }));
+  os.setProperty(runtime, "hostname",
+         facebook::jsi::Function::createFromHostFunction(
+           runtime,
+           facebook::jsi::PropNameID::forAscii(runtime, "hostname"),
+           0, [](facebook::jsi::Runtime &rt,
+               const facebook::jsi::Value &,
+               const facebook::jsi::Value *,
+               size_t) -> facebook::jsi::Value {
+             return facebook::jsi::String::createFromUtf8(
+               rt, getHostName());
+           }));
+  os.setProperty(runtime, "type",
+         facebook::jsi::Function::createFromHostFunction(
+           runtime,
+           facebook::jsi::PropNameID::forAscii(runtime, "type"), 0,
+           [platform](facebook::jsi::Runtime &rt,
+                const facebook::jsi::Value &,
+                const facebook::jsi::Value *,
+                size_t) -> facebook::jsi::Value {
+             return facebook::jsi::String::createFromUtf8(
+               rt, platform.os);
+           }));
+  os.setProperty(runtime, "userInfo",
+                 facebook::jsi::Function::createFromHostFunction(
+                     runtime,
+                     facebook::jsi::PropNameID::forAscii(runtime, "userInfo"),
+                     0, [](facebook::jsi::Runtime &rt,
+                           const facebook::jsi::Value &,
+                           const facebook::jsi::Value *,
+                           size_t) -> facebook::jsi::Value {
+                       facebook::jsi::Object info(rt);
+                       info.setProperty(rt, "username",
+                                        facebook::jsi::String::createFromUtf8(
+                                            rt, getUserName()));
+                       info.setProperty(rt, "homedir",
+                                        facebook::jsi::String::createFromUtf8(
+                                            rt, getHomeDirectory()));
+                       info.setProperty(rt, "shell",
+                                        facebook::jsi::String::createFromUtf8(
+                                            rt, getUserShell()));
+                       return info;
+                     }));
+  os.setProperty(runtime, "loadavg",
+                 facebook::jsi::Function::createFromHostFunction(
+                     runtime,
+                     facebook::jsi::PropNameID::forAscii(runtime, "loadavg"),
+                     0, [](facebook::jsi::Runtime &rt,
+                           const facebook::jsi::Value &,
+                           const facebook::jsi::Value *,
+                           size_t) -> facebook::jsi::Value {
+                       auto loads = getLoadAverage();
+                       facebook::jsi::Array arr(rt, loads.size());
+                       for (size_t i = 0; i < loads.size(); ++i) {
+                         arr.setValueAtIndex(rt, i,
+                                             facebook::jsi::Value(loads[i]));
+                       }
+                       return arr;
+                     }));
+  os.setProperty(runtime, "EOL",
+                 facebook::jsi::String::createFromUtf8(runtime,
+                                                       platform.windows
+                                                           ? "\r\n"
+                                                           : "\n"));
+  os.setProperty(runtime, "release",
+                 facebook::jsi::Function::createFromHostFunction(
+                     runtime,
+                     facebook::jsi::PropNameID::forAscii(runtime, "release"),
+                     0, [](facebook::jsi::Runtime &rt,
+                           const facebook::jsi::Value &,
+                           const facebook::jsi::Value *,
+                           size_t) -> facebook::jsi::Value {
+                       return facebook::jsi::String::createFromUtf8(
+                           rt, getOsRelease());
+                     }));
+  os.setProperty(runtime, "constants", facebook::jsi::Object(runtime));
+  return os;
+}
+
+static facebook::jsi::Value
+convertVectorOfStrings(facebook::jsi::Runtime &runtime,
+                       const std::vector<std::string> &items) {
+  facebook::jsi::Array array(runtime, items.size());
+  for (size_t i = 0; i < items.size(); ++i) {
+    array.setValueAtIndex(runtime, i,
+                          facebook::jsi::String::createFromUtf8(runtime,
+                                                                 items[i]));
+  }
+  return array;
+}
+
+static void installFsBindings(facebook::jsi::Runtime &runtime) {
+  facebook::jsi::Object native(runtime);
+
+  auto statHost = facebook::jsi::Function::createFromHostFunction(
+      runtime, facebook::jsi::PropNameID::forAscii(runtime, "stat"), 2,
+      [](facebook::jsi::Runtime &rt, const facebook::jsi::Value &,
+         const facebook::jsi::Value *args,
+         size_t count) -> facebook::jsi::Value {
+        if (count < 1 || !args[0].isString()) {
+          throw facebook::jsi::JSError(rt,
+                                      "fs.stat requires a string path");
+        }
+
+        std::string pathStr = args[0].asString(rt).utf8(rt);
+        bool followSymlinks = true;
+        if (count >= 2 && args[1].isObject()) {
+          auto opts = args[1].asObject(rt);
+          if (opts.hasProperty(rt, "followSymbolicLinks")) {
+            auto value = opts.getProperty(rt, "followSymbolicLinks");
+            if (value.isBool()) {
+              followSymlinks = value.getBool();
+            }
+          }
+        }
+
+        fs::path target(pathStr);
+        try {
+          auto info = getStatInfo(target, followSymlinks);
+          if (!info.exists) {
+            throw facebook::jsi::JSError(rt, "ENOENT: no such file or directory");
+          }
+          return makeStatObject(rt, std::move(info));
+        } catch (const std::exception &error) {
+          throw facebook::jsi::JSError(rt, error.what());
+        }
+      });
+
+  native.setProperty(runtime, "stat", statHost);
+  native.setProperty(runtime, "lstat",
+                     facebook::jsi::Function::createFromHostFunction(
+                         runtime,
+                         facebook::jsi::PropNameID::forAscii(runtime, "lstat"),
+                         1, [](facebook::jsi::Runtime &rt,
+                               const facebook::jsi::Value &,
+                               const facebook::jsi::Value *args,
+                               size_t count) -> facebook::jsi::Value {
+                           if (count < 1 || !args[0].isString()) {
+                             throw facebook::jsi::JSError(rt,
+                                                          "fs.lstat requires a path");
+                           }
+                           fs::path target(args[0].asString(rt).utf8(rt));
+                           try {
+                             auto info = getStatInfo(target, false);
+                             if (!info.exists) {
+                               throw facebook::jsi::JSError(
+                                   rt, "ENOENT: no such file or directory");
+                             }
+                             return makeStatObject(rt, std::move(info));
+                           } catch (const std::exception &error) {
+                             throw facebook::jsi::JSError(rt, error.what());
+                           }
+                         }));
+
+  native.setProperty(runtime, "exists", facebook::jsi::Function::createFromHostFunction(
+                                    runtime, facebook::jsi::PropNameID::forAscii(runtime, "exists"), 1,
+                                    [](facebook::jsi::Runtime &rt, const facebook::jsi::Value &,
+                                       const facebook::jsi::Value *args,
+                                       size_t count) -> facebook::jsi::Value {
+                                      if (count < 1 || !args[0].isString()) {
+                                        return facebook::jsi::Value(false);
+                                      }
+                                      fs::path target(args[0].asString(rt).utf8(rt));
+                                      std::error_code ec;
+                                      auto exists = fs::exists(target, ec);
+                                      return facebook::jsi::Value(exists && !ec);
+                                    }));
+
+  native.setProperty(runtime, "readdir",
+                     facebook::jsi::Function::createFromHostFunction(
+                         runtime,
+                         facebook::jsi::PropNameID::forAscii(runtime, "readdir"),
+                         1, [](facebook::jsi::Runtime &rt,
+                               const facebook::jsi::Value &,
+                               const facebook::jsi::Value *args,
+                               size_t count) -> facebook::jsi::Value {
+                           if (count < 1 || !args[0].isString()) {
+                             throw facebook::jsi::JSError(
+                                 rt, "fs.readdir requires a path");
+                           }
+                           fs::path directory(args[0].asString(rt).utf8(rt));
+                           std::vector<std::string> entries;
+                           std::error_code ec;
+                           for (const auto &entry :
+                                fs::directory_iterator(directory, ec)) {
+                             entries.emplace_back(entry.path().filename().string());
+                           }
+                           if (ec) {
+                             throw facebook::jsi::JSError(rt, ec.message());
+                           }
+                           return convertVectorOfStrings(rt, entries);
+                         }));
+
+  native.setProperty(runtime, "readFile",
+                     facebook::jsi::Function::createFromHostFunction(
+                         runtime,
+                         facebook::jsi::PropNameID::forAscii(runtime, "readFile"),
+                         2, [](facebook::jsi::Runtime &rt,
+                               const facebook::jsi::Value &,
+                               const facebook::jsi::Value *args,
+                               size_t count) -> facebook::jsi::Value {
+                           if (count < 1 || !args[0].isString()) {
+                             throw facebook::jsi::JSError(
+                                 rt, "fs.readFile requires a path");
+                           }
+                           fs::path target(args[0].asString(rt).utf8(rt));
+                           std::string encoding = "base64";
+                           if (count >= 2 && args[1].isString()) {
+                             encoding = toLowerAscii(
+                                 args[1].asString(rt).utf8(rt));
+                           }
+
+                           try {
+                             auto bytes = readFileBytes(target);
+                             if (encoding == "utf8" || encoding == "utf-8") {
+                               std::string text(bytes.begin(), bytes.end());
+                               return facebook::jsi::String::createFromUtf8(rt,
+                                                                            text);
+                             }
+                             std::string base64 = base64Encode(bytes);
+                             return facebook::jsi::String::createFromUtf8(
+                                 rt, base64);
+                           } catch (const std::exception &error) {
+                             throw facebook::jsi::JSError(rt, error.what());
+                           }
+                         }));
+
+  native.setProperty(runtime, "writeFile",
+                     facebook::jsi::Function::createFromHostFunction(
+                         runtime,
+                         facebook::jsi::PropNameID::forAscii(runtime, "writeFile"),
+                         3, [](facebook::jsi::Runtime &rt,
+                               const facebook::jsi::Value &,
+                               const facebook::jsi::Value *args,
+                               size_t count) -> facebook::jsi::Value {
+                           if (count < 2 || !args[0].isString() ||
+                               !args[1].isString()) {
+                             throw facebook::jsi::JSError(
+                                 rt, "fs.writeFile requires path and data");
+                           }
+                           fs::path target(args[0].asString(rt).utf8(rt));
+                           std::string data = args[1].asString(rt).utf8(rt);
+                           std::string encoding = "utf8";
+                           bool append = false;
+                           if (count >= 3) {
+                             const auto &third = args[2];
+                             if (third.isString()) {
+                               encoding = toLowerAscii(
+                                   third.asString(rt).utf8(rt));
+                             } else if (third.isObject()) {
+                               auto opts = third.asObject(rt);
+                               if (opts.hasProperty(rt, "encoding")) {
+                                 encoding = toLowerAscii(
+                                     opts.getProperty(rt, "encoding")
+                                         .toString(rt)
+                                         .utf8(rt));
+                               }
+                               if (opts.hasProperty(rt, "flag")) {
+                                 auto flag = opts.getProperty(rt, "flag")
+                                                  .toString(rt)
+                                                  .utf8(rt);
+                                 if (flag == "a" || flag == "a+" ||
+                                     flag == "as" || flag == "as+") {
+                                   append = true;
+                                 }
+                               }
+                               if (opts.hasProperty(rt, "append")) {
+                                 auto value = opts.getProperty(rt, "append");
+                                 if (value.isBool()) {
+                                   append = value.getBool();
+                                 }
+                               }
+                             }
+                           }
+
+                           try {
+                             std::vector<unsigned char> bytes;
+                             if (encoding == "utf8" || encoding == "utf-8") {
+                               bytes.assign(data.begin(), data.end());
+                             } else if (encoding == "base64") {
+                               bytes = base64Decode(data);
+                             } else {
+                               throw facebook::jsi::JSError(
+                                   rt, "Unsupported encoding in writeFile");
+                             }
+                             writeFileBytes(target, bytes, append);
+                             return facebook::jsi::Value::undefined();
+                           } catch (const std::exception &error) {
+                             throw facebook::jsi::JSError(rt, error.what());
+                           }
+                         }));
+
+  native.setProperty(runtime, "mkdir",
+                     facebook::jsi::Function::createFromHostFunction(
+                         runtime,
+                         facebook::jsi::PropNameID::forAscii(runtime, "mkdir"),
+                         2, [](facebook::jsi::Runtime &rt,
+                               const facebook::jsi::Value &,
+                               const facebook::jsi::Value *args,
+                               size_t count) -> facebook::jsi::Value {
+                           if (count < 1 || !args[0].isString()) {
+                             throw facebook::jsi::JSError(
+                                 rt, "fs.mkdir requires a path");
+                           }
+                           fs::path target(args[0].asString(rt).utf8(rt));
+                           bool recursive = false;
+                           if (count >= 2 && args[1].isObject()) {
+                             auto opts = args[1].asObject(rt);
+                             if (opts.hasProperty(rt, "recursive")) {
+                               auto value = opts.getProperty(rt, "recursive");
+                               if (value.isBool()) {
+                                 recursive = value.getBool();
+                               }
+                             }
+                           }
+                           std::error_code ec;
+                           if (recursive) {
+                             fs::create_directories(target, ec);
+                           } else {
+                             fs::create_directory(target, ec);
+                           }
+                           if (ec) {
+                             throw facebook::jsi::JSError(rt, ec.message());
+                           }
+                           return facebook::jsi::Value::undefined();
+                         }));
+
+  native.setProperty(runtime, "rm",
+                     facebook::jsi::Function::createFromHostFunction(
+                         runtime,
+                         facebook::jsi::PropNameID::forAscii(runtime, "rm"), 2,
+                         [](facebook::jsi::Runtime &rt,
+                            const facebook::jsi::Value &,
+                            const facebook::jsi::Value *args,
+                            size_t count) -> facebook::jsi::Value {
+                           if (count < 1 || !args[0].isString()) {
+                             throw facebook::jsi::JSError(
+                                 rt, "fs.rm requires a path");
+                           }
+                           fs::path target(args[0].asString(rt).utf8(rt));
+                           bool recursive = false;
+                           bool force = false;
+                           if (count >= 2 && args[1].isObject()) {
+                             auto opts = args[1].asObject(rt);
+                             if (opts.hasProperty(rt, "recursive")) {
+                               auto value = opts.getProperty(rt, "recursive");
+                               if (value.isBool()) {
+                                 recursive = value.getBool();
+                               }
+                             }
+                             if (opts.hasProperty(rt, "force")) {
+                               auto value = opts.getProperty(rt, "force");
+                               if (value.isBool()) {
+                                 force = value.getBool();
+                               }
+                             }
+                           }
+                           std::error_code ec;
+                           if (recursive) {
+                             fs::remove_all(target, ec);
+                           } else {
+                             fs::remove(target, ec);
+                           }
+                           if (ec && !force) {
+                             throw facebook::jsi::JSError(rt, ec.message());
+                           }
+                           return facebook::jsi::Value::undefined();
+                         }));
+
+  native.setProperty(runtime, "realpath",
+                     facebook::jsi::Function::createFromHostFunction(
+                         runtime, facebook::jsi::PropNameID::forAscii(
+                                      runtime, "realpath"),
+                         1, [](facebook::jsi::Runtime &rt,
+                               const facebook::jsi::Value &,
+                               const facebook::jsi::Value *args,
+                               size_t count) -> facebook::jsi::Value {
+                           if (count < 1 || !args[0].isString()) {
+                             throw facebook::jsi::JSError(rt,
+                                                          "fs.realpath requires a path");
+                           }
+                           fs::path target(args[0].asString(rt).utf8(rt));
+                           std::error_code ec;
+                           auto resolved = fs::weakly_canonical(target, ec);
+                           if (ec) {
+                             throw facebook::jsi::JSError(rt, ec.message());
+                           }
+                           return facebook::jsi::String::createFromUtf8(
+                               rt, resolved.string());
+                         }));
+
+  runtime.global().setProperty(runtime, "__nodeFsNative", native);
+}
+
+static void installNodeModules(facebook::jsi::Runtime &runtime,
+                               const PlatformInfo &platform) {
+  installFsBindings(runtime);
+  runtime.global().setProperty(runtime, "__nodeOsInfo",
+                               makeOsInfo(runtime, platform));
+}
+
+static void installProcessBindings(facebook::jsi::Runtime &runtime,
+                                   const PlatformInfo &platform) {
+  if (!runtime.global().hasProperty(runtime, "process")) {
+    return;
+  }
+  auto process = runtime.global().getPropertyAsObject(runtime, "process");
+
+  process.setProperty(runtime, "platform",
+                      facebook::jsi::String::createFromUtf8(runtime,
+                                                            platform.os));
+  process.setProperty(runtime, "arch",
+                      facebook::jsi::String::createFromUtf8(runtime,
+                                                            detectArchitecture()));
+  process.setProperty(runtime, "version",
+                      facebook::jsi::String::createFromUtf8(runtime,
+                                                            "imgui-runtime"));
+  facebook::jsi::Object versions(runtime);
+  versions.setProperty(runtime, "node",
+                       facebook::jsi::String::createFromUtf8(runtime, "0.0"));
+  versions.setProperty(runtime, "hermes",
+                       facebook::jsi::String::createFromUtf8(runtime,
+                                                             "unknown"));
+  process.setProperty(runtime, "versions", versions);
+
+  auto envTarget = process.getPropertyAsObject(runtime, "env");
+  auto envSource = readEnvironment(runtime);
+  auto keys = envSource.getPropertyNames(runtime);
+  size_t length = keys.size(runtime);
+  for (size_t i = 0; i < length; ++i) {
+    auto keyValue = keys.getValueAtIndex(runtime, i);
+    if (!keyValue.isString()) {
+      continue;
+    }
+    std::string key = keyValue.asString(runtime).utf8(runtime);
+    auto value = envSource.getProperty(runtime, key.c_str());
+    envTarget.setProperty(runtime, key.c_str(), value);
+  }
+
+  process.setProperty(runtime, "cwd",
+                      facebook::jsi::Function::createFromHostFunction(
+                          runtime,
+                          facebook::jsi::PropNameID::forAscii(runtime,
+                                                               "cwd"),
+                          0, [](facebook::jsi::Runtime &rt,
+                                const facebook::jsi::Value &,
+                                const facebook::jsi::Value *,
+                                size_t) -> facebook::jsi::Value {
+                            std::error_code ec;
+                            auto current = fs::current_path(ec);
+                            if (ec) {
+                              throw facebook::jsi::JSError(rt, ec.message());
+                            }
+                            return facebook::jsi::String::createFromUtf8(
+                                rt, current.string());
+                          }));
+
+  process.setProperty(runtime, "chdir",
+                      facebook::jsi::Function::createFromHostFunction(
+                          runtime,
+                          facebook::jsi::PropNameID::forAscii(runtime,
+                                                               "chdir"),
+                          1, [](facebook::jsi::Runtime &rt,
+                                const facebook::jsi::Value &,
+                                const facebook::jsi::Value *args,
+                                size_t count) -> facebook::jsi::Value {
+                            if (count < 1 || !args[0].isString()) {
+                              throw facebook::jsi::JSError(
+                                  rt, "process.chdir requires a path");
+                            }
+                            fs::path target(args[0].asString(rt).utf8(rt));
+                            std::error_code ec;
+                            fs::current_path(target, ec);
+                            if (ec) {
+                              throw facebook::jsi::JSError(rt, ec.message());
+                            }
+                            return facebook::jsi::Value::undefined();
+                          }));
+}
+
+} // namespace nodecompat
 
 static std::string trim(const std::string &value) {
   size_t start = 0;
@@ -1362,6 +2331,7 @@ extern "C" SHUnit *sh_export_imgui(void);
 sapp_desc sokol_main(int argc, char *argv[]) {
   // Initialize Sokol time before anything else
   stm_setup();
+  s_runtimeStartMs = stm_ms(stm_now());
   if (curl_global_init(CURL_GLOBAL_DEFAULT) != 0) {
     printf("Failed to initialize libcurl\n");
     exit(1);
@@ -1380,21 +2350,14 @@ sapp_desc sokol_main(int argc, char *argv[]) {
     facebook::jsi::Object helpers =
         hermes->evaluateSHUnit(sh_export_jslib).asObject(*hermes);
 
-    // Set NODE_ENV based on build configuration
-#ifdef NDEBUG
-    const char *nodeEnv = "production";
-#else
-    const char *nodeEnv = "development";
-#endif
-    hermes->global()
-        .getPropertyAsObject(*hermes, "process")
-        .getPropertyAsObject(*hermes, "env")
-        .setProperty(*hermes, "NODE_ENV", nodeEnv);
-
     // Create and initialize HermesApp
     s_hermesApp =
         new HermesApp(shr, helpers.getPropertyAsFunction(*hermes, "peek"),
                       helpers.getPropertyAsFunction(*hermes, "run"));
+
+  PlatformInfo platformInfo = detect_platform_info();
+  nodecompat::installNodeModules(*hermes, platformInfo);
+  nodecompat::installProcessBindings(*hermes, platformInfo);
 
   auto nativeFetchFn = facebook::jsi::Function::createFromHostFunction(
     *hermes,
@@ -1410,6 +2373,17 @@ sapp_desc sokol_main(int argc, char *argv[]) {
                                navConfigureFn);
 
   update_navigation_state_js(*hermes);
+
+  // Set NODE_ENV based on build configuration
+#ifdef NDEBUG
+  const char *nodeEnv = "production";
+#else
+  const char *nodeEnv = "development";
+#endif
+  hermes->global()
+    .getPropertyAsObject(*hermes, "process")
+    .getPropertyAsObject(*hermes, "env")
+    .setProperty(*hermes, "NODE_ENV", nodeEnv);
 
     // Initialize jslib's current time
     double curTimeMs = stm_ms(stm_now());
@@ -1428,7 +2402,7 @@ sapp_desc sokol_main(int argc, char *argv[]) {
     s_hermesApp->hermes->global().setProperty(*s_hermesApp->hermes,
                                               "performance", perf);
 
-  push_platform_info_to_js(hermes);
+  push_platform_info_to_js(hermes, platformInfo);
 
     // Create globalThis.sappConfig with default title
     auto sappConfig = facebook::jsi::Object(*s_hermesApp->hermes);
