@@ -12,6 +12,7 @@
 #include "stb_image.h"
 
 #include "sokol_imgui.h"
+#include "imgui/imgui.h"
 
 // Must be separate to avoid reordering.
 #include "sokol_debugtext.h"
@@ -61,6 +62,93 @@ public:
 static HermesApp *s_hermesApp = nullptr;
 
 static sg_sampler s_sampler = {};
+static bool s_navKeyboardEnabled = true;
+static bool s_navGamepadEnabled = true;
+
+static void apply_navigation_config() {
+  if (ImGui::GetCurrentContext() == nullptr) {
+    return;
+  }
+
+  ImGuiIO &io = ImGui::GetIO();
+
+  if (s_navKeyboardEnabled) {
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+  } else {
+    io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableKeyboard;
+  }
+
+  if (s_navGamepadEnabled) {
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
+  } else {
+    io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableGamepad;
+  }
+}
+
+static void update_navigation_state_js(facebook::jsi::Runtime &runtime) {
+  try {
+    auto global = runtime.global();
+    if (!global.hasProperty(runtime, "__setNavigationState")) {
+      return;
+    }
+    auto setter = global.getPropertyAsFunction(runtime, "__setNavigationState");
+    setter.call(runtime, s_navKeyboardEnabled, s_navGamepadEnabled);
+  } catch (...) {
+    // Ignore synchronization errors to avoid disrupting rendering.
+  }
+}
+
+static facebook::jsi::Value
+configure_navigation_host(facebook::jsi::Runtime &runtime,
+                          const facebook::jsi::Value &,
+                          const facebook::jsi::Value *args, size_t count) {
+  bool keyboard = s_navKeyboardEnabled;
+  bool gamepad = s_navGamepadEnabled;
+
+  if (count >= 1) {
+    const auto &first = args[0];
+    if (first.isObject() && !first.isNull()) {
+      auto obj = first.asObject(runtime);
+      if (obj.hasProperty(runtime, "keyboard")) {
+        auto value = obj.getProperty(runtime, "keyboard");
+        if (value.isBool()) {
+          keyboard = value.getBool();
+        } else if (value.isNumber()) {
+          keyboard = value.getNumber() != 0.0;
+        }
+      }
+      if (obj.hasProperty(runtime, "gamepad")) {
+        auto value = obj.getProperty(runtime, "gamepad");
+        if (value.isBool()) {
+          gamepad = value.getBool();
+        } else if (value.isNumber()) {
+          gamepad = value.getNumber() != 0.0;
+        }
+      }
+    } else if (first.isBool()) {
+      keyboard = first.getBool();
+    } else if (first.isNumber()) {
+      keyboard = first.getNumber() != 0.0;
+    }
+  }
+
+  if (count >= 2) {
+    const auto &second = args[1];
+    if (second.isBool()) {
+      gamepad = second.getBool();
+    } else if (second.isNumber()) {
+      gamepad = second.getNumber() != 0.0;
+    }
+  }
+
+  s_navKeyboardEnabled = keyboard;
+  s_navGamepadEnabled = gamepad;
+
+  apply_navigation_config();
+  update_navigation_state_js(runtime);
+
+  return facebook::jsi::Value::undefined();
+}
 
 struct PlatformInfo {
   std::string os;
@@ -942,6 +1030,10 @@ static void app_init() {
   sg_desc desc = {.logger.func = slog_func, .context = sapp_sgcontext()};
   sg_setup(&desc);
   simgui_setup(simgui_desc_t{});
+  apply_navigation_config();
+  if (s_hermesApp && s_hermesApp->hermes) {
+    update_navigation_state_js(*s_hermesApp->hermes);
+  }
 
   s_sampler = sg_make_sampler(sg_sampler_desc{
       .min_filter = SG_FILTER_LINEAR,
@@ -1309,6 +1401,15 @@ sapp_desc sokol_main(int argc, char *argv[]) {
     facebook::jsi::PropNameID::forAscii(*hermes, "__nativeFetch"), 2,
     nativeFetchStart);
   hermes->global().setProperty(*hermes, "__nativeFetch", nativeFetchFn);
+
+  auto navConfigureFn = facebook::jsi::Function::createFromHostFunction(
+      *hermes,
+      facebook::jsi::PropNameID::forAscii(*hermes, "__configureImGuiNavigation"),
+      2, configure_navigation_host);
+  hermes->global().setProperty(*hermes, "__configureImGuiNavigation",
+                               navConfigureFn);
+
+  update_navigation_state_js(*hermes);
 
     // Initialize jslib's current time
     double curTimeMs = stm_ms(stm_now());

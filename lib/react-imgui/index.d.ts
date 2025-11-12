@@ -88,8 +88,54 @@ export interface WindowProps {
   defaultWidth?: number;
   defaultHeight?: number;
   flags?: number;
+  menuBar?: boolean;
+  noTitleBar?: boolean;
+  noResize?: boolean;
+  noMove?: boolean;
+  noScrollbar?: boolean;
+  noScrollWithMouse?: boolean;
+  noCollapse?: boolean;
+  alwaysAutoResize?: boolean;
+  noBackground?: boolean;
+  noSavedSettings?: boolean;
+  noMouseInputs?: boolean;
+  horizontalScrollbar?: boolean;
+  noFocusOnAppearing?: boolean;
+  noBringToFrontOnFocus?: boolean;
+  alwaysVerticalScrollbar?: boolean;
+  alwaysHorizontalScrollbar?: boolean;
+  alwaysUseWindowPadding?: boolean;
+  noNavInputs?: boolean;
+  noNavFocus?: boolean;
+  unsavedDocument?: boolean;
   onWindowState?: (x: number, y: number, width: number, height: number) => void;
   onClose?: () => void;
+  children?: ReactNode;
+}
+
+export interface MainMenuBarProps {
+  children?: ReactNode;
+}
+
+export interface MenuBarProps {
+  children?: ReactNode;
+}
+
+export interface MenuProps {
+  label?: string;
+  enabled?: boolean;
+  children?: ReactNode;
+}
+
+export interface MenuItemProps {
+  label?: string;
+  shortcut?: string;
+  enabled?: boolean;
+  selected?: boolean;
+  defaultSelected?: boolean;
+  toggle?: boolean;
+  onSelect?: (selected?: boolean) => void;
+  onChange?: (selected: boolean) => void;
   children?: ReactNode;
 }
 
@@ -338,6 +384,16 @@ export interface ColorButtonProps {
   onClick?: () => void;
 }
 
+export interface NavigationState {
+  keyboard: boolean;
+  gamepad: boolean;
+}
+
+export interface NavigationModule {
+  configure(options: Partial<NavigationState>): NavigationState;
+  getState(): NavigationState;
+}
+
 export interface ReactImguiRoot {
   container: {
     rootChildren: unknown[];
@@ -348,6 +404,10 @@ export interface ReactImguiRoot {
 export declare const Root: (props: RootProps) => JSX.Element;
 export declare const Window: (props: WindowProps) => JSX.Element;
 export declare const ChildWindow: (props: ChildWindowProps) => JSX.Element;
+export declare const MainMenuBar: (props: MainMenuBarProps) => JSX.Element;
+export declare const MenuBar: (props: MenuBarProps) => JSX.Element;
+export declare const Menu: (props: MenuProps) => JSX.Element;
+export declare const MenuItem: (props: MenuItemProps) => JSX.Element;
 export declare const Button: (props: ButtonProps) => JSX.Element;
 export declare const Text: (props: TextProps) => JSX.Element;
 export declare const Group: (props: GroupProps) => JSX.Element;
@@ -380,6 +440,7 @@ export declare const ColorEdit4: (props: ColorEdit4Props) => JSX.Element;
 export declare const ColorButton: (props: ColorButtonProps) => JSX.Element;
 export declare const Platform: PlatformModule;
 export declare const Dimensions: DimensionsModule;
+export declare const Navigation: NavigationModule;
 
 export declare function createRoot(): ReactImguiRoot;
 export declare function render(element: ReactElement, root: ReactImguiRoot): Promise<ReactImguiRoot['container']>;
