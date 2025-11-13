@@ -19,6 +19,7 @@
 
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
+#include <sys/sysctl.h>
 #endif
 
 #include <hermes/VM/static_h.h>
@@ -801,6 +802,111 @@ static std::string toLowerAscii(std::string value) {
   return value;
 }
 
+static std::string trimWhitespace(const std::string &value) {
+  size_t start = 0;
+  size_t end = value.size();
+  while (start < end && std::isspace(static_cast<unsigned char>(value[start]))) {
+    ++start;
+  }
+  while (end > start && std::isspace(static_cast<unsigned char>(value[end - 1]))) {
+    --end;
+  }
+  return value.substr(start, end - start);
+}
+
+static std::string readCpuModelFromSystem() {
+#if defined(__APPLE__)
+  size_t size = 0;
+  if (sysctlbyname("machdep.cpu.brand_string", nullptr, &size, nullptr, 0) == 0 &&
+      size > 1) {
+    std::string buffer(size, '\0');
+    if (sysctlbyname("machdep.cpu.brand_string", buffer.data(), &size, nullptr, 0) == 0) {
+      if (!buffer.empty() && buffer.back() == '\0') {
+        buffer.pop_back();
+      }
+      return buffer;
+    }
+  }
+#elif defined(__linux__)
+  std::ifstream cpuinfo("/proc/cpuinfo");
+  if (cpuinfo) {
+    std::string line;
+    while (std::getline(cpuinfo, line)) {
+      auto colon = line.find(':');
+      if (colon == std::string::npos) {
+        continue;
+      }
+      const std::string key = trimWhitespace(line.substr(0, colon));
+      if (key == "model name") {
+        return trimWhitespace(line.substr(colon + 1));
+      }
+    }
+  }
+#endif
+  return {};
+}
+
+static double readCpuSpeedFromSystemMHz() {
+#if defined(__APPLE__)
+  uint64_t frequency = 0;
+  size_t size = sizeof(frequency);
+  if (sysctlbyname("hw.cpufrequency", &frequency, &size, nullptr, 0) == 0 && frequency > 0) {
+    return static_cast<double>(frequency) / 1'000'000.0;
+  }
+#elif defined(__linux__)
+  std::ifstream cpuinfo("/proc/cpuinfo");
+  if (cpuinfo) {
+    std::string line;
+    while (std::getline(cpuinfo, line)) {
+      auto colon = line.find(':');
+      if (colon == std::string::npos) {
+        continue;
+      }
+      const std::string key = trimWhitespace(line.substr(0, colon));
+      if (key == "cpu MHz") {
+        try {
+          return std::stod(trimWhitespace(line.substr(colon + 1)));
+        } catch (...) {
+          return 0.0;
+        }
+      }
+    }
+  }
+#endif
+  return 0.0;
+}
+
+static std::string getCpuModel() {
+  static std::once_flag once;
+  static std::string cached;
+  std::call_once(once, []() {
+    cached = readCpuModelFromSystem();
+    if (cached.empty()) {
+      cached = detectArchitecture();
+    }
+  });
+  return cached;
+}
+
+static double getCpuSpeedMHz() {
+  static std::once_flag once;
+  static double cached = 0.0;
+  std::call_once(once, []() {
+    cached = readCpuSpeedFromSystemMHz();
+  });
+  return cached;
+}
+
+static uint32_t getCpuCount() {
+  static std::once_flag once;
+  static uint32_t cached = 0;
+  std::call_once(once, []() {
+    unsigned int count = std::thread::hardware_concurrency();
+    cached = static_cast<uint32_t>(count);
+  });
+  return cached;
+}
+
 static facebook::jsi::Object makeStatObject(facebook::jsi::Runtime &runtime,
                       StatInfo info) {
   auto infoPtr = std::make_shared<StatInfo>(std::move(info));
@@ -843,13 +949,46 @@ static facebook::jsi::Object makeOsInfo(facebook::jsi::Runtime &runtime,
                     const PlatformInfo &platform) {
   facebook::jsi::Object os(runtime);
   os.setProperty(runtime, "platform",
-         facebook::jsi::String::createFromUtf8(runtime, platform.os));
+         facebook::jsi::Function::createFromHostFunction(
+           runtime,
+           facebook::jsi::PropNameID::forAscii(runtime, "platform"),
+           0, [platform](facebook::jsi::Runtime &rt,
+                        const facebook::jsi::Value &,
+                        const facebook::jsi::Value *,
+                        size_t) -> facebook::jsi::Value {
+             return facebook::jsi::String::createFromUtf8(rt, platform.os);
+           }));
   os.setProperty(runtime, "arch",
-         facebook::jsi::String::createFromUtf8(
-           runtime, detectArchitecture()));
+         facebook::jsi::Function::createFromHostFunction(
+           runtime,
+           facebook::jsi::PropNameID::forAscii(runtime, "arch"), 0,
+           [](facebook::jsi::Runtime &rt, const facebook::jsi::Value &,
+              const facebook::jsi::Value *,
+              size_t) -> facebook::jsi::Value {
+             return facebook::jsi::String::createFromUtf8(
+               rt, detectArchitecture());
+           }));
   os.setProperty(runtime, "release",
-         facebook::jsi::String::createFromUtf8(runtime,
-                             getOsRelease()));
+         facebook::jsi::Function::createFromHostFunction(
+           runtime,
+           facebook::jsi::PropNameID::forAscii(runtime, "release"), 0,
+           [](facebook::jsi::Runtime &rt, const facebook::jsi::Value &,
+              const facebook::jsi::Value *,
+              size_t) -> facebook::jsi::Value {
+             return facebook::jsi::String::createFromUtf8(
+               rt, getOsRelease());
+           }));
+  os.setProperty(runtime, "windows", facebook::jsi::Value(platform.windows));
+  os.setProperty(runtime, "macos", facebook::jsi::Value(platform.macos));
+  os.setProperty(runtime, "linux", facebook::jsi::Value(platform.linux));
+  os.setProperty(runtime, "android", facebook::jsi::Value(platform.android));
+  os.setProperty(runtime, "ios", facebook::jsi::Value(platform.ios));
+  os.setProperty(runtime, "web", facebook::jsi::Value(platform.web));
+  os.setProperty(runtime, "isNative", facebook::jsi::Value(platform.isNative));
+  os.setProperty(runtime, "isDesktop", facebook::jsi::Value(platform.isDesktop));
+  os.setProperty(runtime, "isMobile", facebook::jsi::Value(platform.isMobile));
+  os.setProperty(runtime, "isTV", facebook::jsi::Value(platform.isTV));
+  os.setProperty(runtime, "version", facebook::jsi::Value(platform.version));
   os.setProperty(runtime, "endianness",
          facebook::jsi::Function::createFromHostFunction(
            runtime,
@@ -972,22 +1111,49 @@ static facebook::jsi::Object makeOsInfo(facebook::jsi::Runtime &runtime,
                        }
                        return arr;
                      }));
+  os.setProperty(runtime, "cpus",
+                 facebook::jsi::Function::createFromHostFunction(
+                     runtime,
+                     facebook::jsi::PropNameID::forAscii(runtime, "cpus"), 0,
+                     [](facebook::jsi::Runtime &rt, const facebook::jsi::Value &,
+                        const facebook::jsi::Value *,
+                        size_t) -> facebook::jsi::Value {
+                       const uint32_t count = getCpuCount();
+                       facebook::jsi::Array arr(rt, count);
+                       const std::string model = getCpuModel();
+                       const double speed = getCpuSpeedMHz();
+                       for (uint32_t i = 0; i < count; ++i) {
+                         facebook::jsi::Object cpu(rt);
+                         cpu.setProperty(rt, "model",
+                                         facebook::jsi::String::createFromUtf8(rt, model));
+                         cpu.setProperty(rt, "speed", facebook::jsi::Value(speed));
+                         facebook::jsi::Object times(rt);
+                         times.setProperty(rt, "user", 0.0);
+                         times.setProperty(rt, "nice", 0.0);
+                         times.setProperty(rt, "sys", 0.0);
+                         times.setProperty(rt, "idle", 0.0);
+                         times.setProperty(rt, "irq", 0.0);
+                         cpu.setProperty(rt, "times", times);
+                         arr.setValueAtIndex(rt, i, cpu);
+                       }
+                       return arr;
+                     }));
+  os.setProperty(runtime, "networkInterfaces",
+                 facebook::jsi::Function::createFromHostFunction(
+                     runtime,
+                     facebook::jsi::PropNameID::forAscii(runtime,
+                                                          "networkInterfaces"),
+                     0, [](facebook::jsi::Runtime &rt,
+                           const facebook::jsi::Value &,
+                           const facebook::jsi::Value *,
+                           size_t) -> facebook::jsi::Value {
+                       return facebook::jsi::Object(rt);
+                     }));
   os.setProperty(runtime, "EOL",
                  facebook::jsi::String::createFromUtf8(runtime,
                                                        platform.windows
                                                            ? "\r\n"
                                                            : "\n"));
-  os.setProperty(runtime, "release",
-                 facebook::jsi::Function::createFromHostFunction(
-                     runtime,
-                     facebook::jsi::PropNameID::forAscii(runtime, "release"),
-                     0, [](facebook::jsi::Runtime &rt,
-                           const facebook::jsi::Value &,
-                           const facebook::jsi::Value *,
-                           size_t) -> facebook::jsi::Value {
-                       return facebook::jsi::String::createFromUtf8(
-                           rt, getOsRelease());
-                     }));
   os.setProperty(runtime, "constants", facebook::jsi::Object(runtime));
   return os;
 }
