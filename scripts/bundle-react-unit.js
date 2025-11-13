@@ -14,6 +14,7 @@ import { glob } from 'glob';
 // Example: bundle-react-unit.js src/react-unit/index.js build/react-bundle.js production
 
 const useReactCompiler = process.env.USE_REACT_COMPILER === 'true';
+const bundlePlatform = process.env.BUNDLE_PLATFORM || 'neutral';
 const entryPoint = process.argv[2];
 const outfile = process.argv[3];
 const nodeEnv = process.argv[4] || 'production';
@@ -78,6 +79,19 @@ const alias = {
   'react-imgui-reconciler': libDir,
   'react-imgui': runtimeDir,
   buffer: resolve(__dirname, '../lib/jslib-unit/node-buffer.js'),
+  'node:buffer': resolve(__dirname, '../lib/jslib-unit/node-buffer.js'),
+  fs: resolve(__dirname, '../lib/jslib-unit/node-fs.js'),
+  'node:fs': resolve(__dirname, '../lib/jslib-unit/node-fs.js'),
+  'fs/promises': resolve(__dirname, '../lib/jslib-unit/node-fs-promises.js'),
+  path: resolve(__dirname, '../lib/jslib-unit/node-path.js'),
+  'node:path': resolve(__dirname, '../lib/jslib-unit/node-path.js'),
+  'path/posix': resolve(__dirname, '../lib/jslib-unit/node-path-posix.js'),
+  'path/win32': resolve(__dirname, '../lib/jslib-unit/node-path-win32.js'),
+  stream: resolve(__dirname, '../lib/jslib-unit/node-stream.js'),
+  'node:stream': resolve(__dirname, '../lib/jslib-unit/node-stream.js'),
+  'stream/promises': resolve(__dirname, '../lib/jslib-unit/node-stream-promises.js'),
+  os: resolve(__dirname, '../lib/jslib-unit/node-os.js'),
+  'node:os': resolve(__dirname, '../lib/jslib-unit/node-os.js'),
 };
 
 const reactAliasRoots = [];
@@ -154,7 +168,7 @@ const buildOptions = {
   entryPoints: [actualEntryPoint],
   bundle: true,
   outfile,
-  platform: 'neutral',
+  platform: bundlePlatform,
   format: 'iife',
   target: 'esnext',
   minify: false,

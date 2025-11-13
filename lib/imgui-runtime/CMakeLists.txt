@@ -2,7 +2,14 @@
 # SPDX-License-Identifier: MIT
 # See LICENSE file for full license text
 
-find_package(CURL REQUIRED)
+if(NOT IMGUI_PLATFORM_WEB)
+    find_package(CURL REQUIRED)
+endif()
+
+set(_imgui_runtime_libcurl_target)
+if(TARGET CURL::libcurl)
+    set(_imgui_runtime_libcurl_target CURL::libcurl)
+endif()
 
 add_library(imgui-runtime imgui-runtime.cpp
     MappedFileBuffer.cpp
@@ -20,7 +27,7 @@ target_link_libraries(imgui-runtime
     $<$<CONFIG:Release>:hermesvm_a jsi boost_context>
     $<$<CONFIG:Debug>:hermesvm>
     $<$<PLATFORM_ID:Linux>:icuuc icui18n icudata>
-    CURL::libcurl
+    ${_imgui_runtime_libcurl_target}
 )
 target_include_directories(imgui-runtime
     PUBLIC
@@ -31,3 +38,9 @@ target_include_directories(imgui-runtime
         ${HERMES_SRC}/API
         ${HERMES_SRC}/API/jsi
 )
+
+if(IMGUI_PLATFORM_WEB)
+    target_compile_definitions(imgui-runtime PUBLIC IMGUI_PLATFORM_WEB=1 IMGUI_WEB_JSLIB_PATH="/runtime/jslib.js")
+else()
+    target_compile_definitions(imgui-runtime PUBLIC IMGUI_PLATFORM_WEB=0)
+endif()
