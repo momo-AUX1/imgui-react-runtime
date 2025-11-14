@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execSync, spawn } from 'child_process';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, realpathSync } from 'fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, realpathSync, rmSync } from 'fs';
 import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -39,12 +39,14 @@ Usage:
   react-imgui create <project-name>                     Create a new react-imgui project
   react-imgui build [project-path] [--debug|--release]  Configure & build (default: --debug)
   react-imgui run   [project-path] [--debug|--release]  Run an existing build
+  react-imgui clean [project-path] [--debug] [--release] Remove CMake build folders (default: both)
   react-imgui help                               Show this help message
 
 Examples:
   react-imgui create my-app
   react-imgui build ./my-app --release
   react-imgui run ./my-app
+  react-imgui clean ./my-app --debug
 `);
 }
 
@@ -75,6 +77,32 @@ function parseProjectArgs(rawArgs) {
   return {
     projectPath: projectPath || '.',
     buildType: requestedType || 'Debug'
+  };
+}
+
+function parseCleanArgs(rawArgs) {
+  let projectPath;
+  const requestedTypes = new Set();
+
+  for (const arg of rawArgs) {
+    if (arg === '--debug' || arg === '-d') {
+      requestedTypes.add('Debug');
+    } else if (arg === '--release' || arg === '-r') {
+      requestedTypes.add('Release');
+    } else if (arg.startsWith('--')) {
+      fail(`Unknown option: ${arg}`);
+    } else if (!projectPath) {
+      projectPath = arg;
+    } else {
+      fail('Too many positional arguments');
+    }
+  }
+
+  const buildTypes = requestedTypes.size > 0 ? Array.from(requestedTypes) : ['Debug', 'Release'];
+
+  return {
+    projectPath: projectPath || '.',
+    buildTypes
   };
 }
 
@@ -377,6 +405,28 @@ The build step installs npm dependencies automatically if needed. Replace icon.p
 `);
 }
 
+function cleanProject(projectPath = '.', buildTypes = ['Debug', 'Release']) {
+  const { resolvedPath } = resolveProject(projectPath);
+  const targets = buildTypes.length > 0 ? buildTypes : ['Debug', 'Release'];
+
+  for (const buildType of targets) {
+    const dirName = getBuildDirName(buildType);
+    const dirPath = join(resolvedPath, dirName);
+    if (existsSync(dirPath)) {
+      console.log(`Removing ${dirName}...`);
+      try {
+        rmSync(dirPath, { recursive: true, force: true });
+      } catch (error) {
+        fail(`Failed to remove ${dirName}: ${error.message}`);
+      }
+    } else {
+      console.log(`Skipping ${dirName} (not found).`);
+    }
+  }
+
+  console.log('Clean complete.');
+}
+
 const args = process.argv.slice(2);
 const command = args[0];
 
@@ -394,6 +444,12 @@ switch (command) {
   case 'run': {
     const { projectPath, buildType } = parseProjectArgs(args.slice(1));
     runProject(projectPath, buildType);
+    break;
+  }
+
+  case 'clean': {
+    const { projectPath, buildTypes } = parseCleanArgs(args.slice(1));
+    cleanProject(projectPath, buildTypes);
     break;
   }
 
