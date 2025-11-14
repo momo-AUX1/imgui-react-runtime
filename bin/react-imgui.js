@@ -214,8 +214,10 @@ function ensureDependencies(resolvedPath) {
 
 function configureProject(resolvedPath, buildDirName, buildType) {
   console.log(`Configuring (${buildType})...`);
+  const bundleMode = buildType === 'Release' ? 0 : 2;
+  const configureCommand = `cmake -B ${buildDirName} -DCMAKE_BUILD_TYPE=${buildType} -DREACT_BUNDLE_MODE=${bundleMode} -G Ninja`;
   try {
-    execSync(`cmake -B ${buildDirName} -DCMAKE_BUILD_TYPE=${buildType} -G Ninja`, {
+    execSync(configureCommand, {
       cwd: resolvedPath,
       stdio: 'inherit'
     });
@@ -290,6 +292,8 @@ function runProject(projectPath = '.', buildType = 'Debug') {
     } else {
       console.warn(`Hot reload: entry point ${entryAbsolute} not found, skipping watcher.`);
     }
+  } else {
+    console.log('Hot reload disabled for release builds; bundle is embedded in the executable.');
   }
 
   const displayTarget = appBundle ?? executable;

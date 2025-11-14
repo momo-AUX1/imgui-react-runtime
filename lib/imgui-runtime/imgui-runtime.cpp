@@ -63,6 +63,10 @@
 
 namespace fs = std::filesystem;
 
+#ifndef IMGUI_RUNTIME_HIDE_PERF_OVERLAY
+#define IMGUI_RUNTIME_HIDE_PERF_OVERLAY 0
+#endif
+
 #if defined(__APPLE__) || defined(__linux__) || defined(__unix__) ||          \
   defined(__EMSCRIPTEN__) || defined(__ANDROID__)
 extern char **environ;
@@ -3097,6 +3101,8 @@ static void app_frame() {
   update_performance_metrics();
 
   simgui_render();
+
+#if !IMGUI_RUNTIME_HIDE_PERF_OVERLAY
   sdtx_canvas((float)sapp_width(), (float)sapp_height());
 
   // Position at bottom-left corner
@@ -3113,6 +3119,7 @@ static void app_frame() {
                 (int)(s_react_max_ms_display * 1000.0 + 0.5));
   }
   sdtx_draw();
+#endif
   sg_end_pass();
   sg_commit();
 }

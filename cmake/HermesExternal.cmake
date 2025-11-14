@@ -58,9 +58,11 @@ if(HERMES_BUILD_DIR)
     if(NOT EXISTS "${SHERMES}")
         message(FATAL_ERROR "shermes binary not found: ${SHERMES}")
     endif()
+    set(SHERMES ${SHERMES} CACHE FILEPATH "Path to shermes binary" FORCE)
 
     # Set hermes binary path (optional tool, don't fail if missing)
     set(HERMES "${HERMES_BUILD}/bin/hermes")
+    set(HERMES ${HERMES} CACHE FILEPATH "Path to hermes binary" FORCE)
 
     message(STATUS "Hermes source: ${HERMES_SRC}")
     message(STATUS "Hermes build: ${HERMES_BUILD}")
@@ -112,6 +114,8 @@ else()
     # Set tool paths (these will be valid after Hermes is built)
     set(SHERMES "${HERMES_BUILD}/bin/shermes")
     set(HERMES "${HERMES_BUILD}/bin/hermes")
+    set(SHERMES ${SHERMES} CACHE FILEPATH "Path to shermes binary" FORCE)
+    set(HERMES ${HERMES} CACHE FILEPATH "Path to hermes binary" FORCE)
 
     # Add a target for manual rebuilds
     add_custom_target(hermes-rebuild

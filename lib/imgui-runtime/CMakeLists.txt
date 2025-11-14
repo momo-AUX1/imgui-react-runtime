@@ -44,3 +44,8 @@ if(IMGUI_PLATFORM_WEB)
 else()
     target_compile_definitions(imgui-runtime PUBLIC IMGUI_PLATFORM_WEB=0)
 endif()
+
+target_compile_definitions(imgui-runtime PUBLIC
+    $<$<CONFIG:Release>:IMGUI_RUNTIME_HIDE_PERF_OVERLAY=1>
+    $<$<NOT:$<CONFIG:Release>>:IMGUI_RUNTIME_HIDE_PERF_OVERLAY=0>
+)
