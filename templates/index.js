@@ -76,7 +76,7 @@ configureSapp({
   height: 600,
   icon: './icon.png',
   resizable: true, // set to false or provide nonresize: true for fixed windows
-  highDpi: true,
+  highDpi: false,
   enableClipboard: true,
 });
 
