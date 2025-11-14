@@ -90,6 +90,65 @@ export interface DimensionsModule {
   removeEventListener(type: 'change', handler: DimensionsListener): void;
 }
 
+export type ColorScheme = 'light' | 'dark' | 'unknown';
+
+export interface AppearanceChangeEvent {
+  colorScheme: ColorScheme;
+}
+
+export type AppearanceListener = (event: AppearanceChangeEvent) => void;
+
+export interface AppearanceModule {
+  getColorScheme(): ColorScheme;
+  addChangeListener(listener: AppearanceListener): { remove(): void };
+  removeChangeListener(listener: AppearanceListener): void;
+}
+
+export interface FontGlyphOffset {
+  x?: number;
+  y?: number;
+}
+
+export interface FontOversample {
+  x?: number;
+  y?: number;
+}
+
+export type FontRangeDescriptor =
+  | number
+  | [number, number]
+  | { start: number; end: number };
+
+export type FontSource = 'default' | 'imgui-default' | 'memory' | 'file' | 'system-emoji' | string;
+
+export interface FontDescriptor {
+  name: string;
+  size?: number;
+  merge?: boolean;
+  pixelSnap?: boolean;
+  rasterizerMultiply?: number;
+  glyphOffset?: FontGlyphOffset;
+  oversample?: FontOversample;
+  glyphPresets?: string[];
+  glyphRanges?: FontRangeDescriptor[] | FontRangeDescriptor;
+  source?: FontSource;
+  path?: string;
+  data?: ArrayBuffer | ArrayBufferView | string;
+}
+
+export interface ConfigureFontsOptions {
+  defaultFont?: string;
+  globalScale?: number;
+}
+
+export interface FontConfigurationSummary {
+  fonts: Record<string, number | string>;
+  defaultFont?: number | string;
+  atlasWidth?: number;
+  atlasHeight?: number;
+  globalScale?: number;
+}
+
 export interface RootProps {
   children?: ReactNode;
 }
@@ -567,6 +626,14 @@ export interface StyleSheetStatic {
   compose<T>(style1?: StyleProp<T>, style2?: StyleProp<T>): StyleProp<T>;
   flatten<T>(style?: StyleProp<T>): T | undefined;
   hairlineWidth: number;
+  registerFont(name: string, nativeHandle?: number | string): void;
+  configureFonts(fonts: FontDescriptor[], options?: ConfigureFontsOptions): FontConfigurationSummary;
+  getCurrentFontConfiguration(): FontConfigurationSummary | null;
+  getFontHandle(name: string): number | string | undefined;
+  createTheme(theme: unknown): unknown;
+  applyTheme(theme: unknown): unknown;
+  clearTheme(): void;
+  getTheme(): unknown;
 }
 
 export interface ReactImguiRoot {
@@ -634,38 +701,12 @@ export declare const Platform: PlatformModule;
 export declare const Dimensions: DimensionsModule;
 export declare const Navigation: NavigationModule;
 export declare const StyleSheet: StyleSheetStatic;
+export declare const Appearance: AppearanceModule;
 
 export declare function createRoot(): ReactImguiRoot;
 export declare function render(element: ReactElement, root: ReactImguiRoot): Promise<ReactImguiRoot['container']>;
 export declare function useWindowDimensions(): DimensionMetrics;
-export declare function batchedUpdates<A extends any[], R>(fn: (...args: A) => R, ...args: A): R;
-export declare function discreteUpdates<A extends any[], R>(fn: (...args: A) => R, ...args: A): R;
-export declare function flushSync<R>(fn: () => R): R;
-export declare const Circle: (props: CircleProps) => JSX.Element;
-export declare const Checkbox: (props: CheckboxProps) => JSX.Element;
-export declare const SliderFloat: (props: SliderFloatProps) => JSX.Element;
-export declare const SliderInt: (props: SliderIntProps) => JSX.Element;
-export declare const ProgressBar: (props: ProgressBarProps) => JSX.Element;
-export declare const Spacing: (props: SpacingProps) => JSX.Element;
-export declare const InputText: (props: InputTextProps) => JSX.Element;
-export declare const InputFloat: (props: InputFloatProps) => JSX.Element;
-export declare const InputInt: (props: InputIntProps) => JSX.Element;
-export declare const DragFloat: (props: DragFloatProps) => JSX.Element;
-export declare const DragInt: (props: DragIntProps) => JSX.Element;
-export declare const Combo: (props: ComboProps) => JSX.Element;
-export declare const Selectable: (props: SelectableProps) => JSX.Element;
-export declare const RadioButton: (props: RadioButtonProps) => JSX.Element;
-export declare const ColorEdit3: (props: ColorEdit3Props) => JSX.Element;
-export declare const ColorEdit4: (props: ColorEdit4Props) => JSX.Element;
-export declare const ColorButton: (props: ColorButtonProps) => JSX.Element;
-export declare const Platform: PlatformModule;
-export declare const Dimensions: DimensionsModule;
-export declare const Navigation: NavigationModule;
-export declare const StyleSheet: StyleSheetStatic;
-
-export declare function createRoot(): ReactImguiRoot;
-export declare function render(element: ReactElement, root: ReactImguiRoot): Promise<ReactImguiRoot['container']>;
-export declare function useWindowDimensions(): DimensionMetrics;
+export declare function useColorScheme(): ColorScheme;
 export declare function batchedUpdates<A extends any[], R>(fn: (...args: A) => R, ...args: A): R;
 export declare function discreteUpdates<A extends any[], R>(fn: (...args: A) => R, ...args: A): R;
 export declare function flushSync<R>(fn: () => R): R;

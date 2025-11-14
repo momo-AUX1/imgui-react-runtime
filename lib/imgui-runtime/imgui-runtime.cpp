@@ -20,6 +20,11 @@
 #if defined(__APPLE__)
 #include <TargetConditionals.h>
 #include <sys/sysctl.h>
+#include <CoreFoundation/CoreFoundation.h>
+#endif
+
+#if defined(_WIN32)
+#include <windows.h>
 #endif
 
 #include <hermes/VM/static_h.h>
@@ -46,8 +51,8 @@
 #include <vector>
 #include <chrono>
 #include <cstdlib>
-#include <sstream>
 #include <system_error>
+#include <cstdio>
 
 #if !defined(_WIN32)
 #include <sys/utsname.h>
@@ -297,6 +302,18 @@ static int s_lastWindowHeight = -1;
 static float s_lastDpiScale = 0.0f;
 static float s_lastFontScale = 0.0f;
 
+static sg_image s_fontAtlasImage = {0};
+static simgui_image_t s_fontAtlasHandle = {0};
+static bool s_fontAtlasValid = false;
+static std::vector<std::vector<uint8_t>> s_fontBlobs;
+static std::unordered_map<std::string, ImFont *> s_registeredFonts;
+static ImFont *s_defaultFont = nullptr;
+static float s_fontGlobalScale = 1.0f;
+static std::vector<ImVector<ImWchar>> s_fontRangeBuffers;
+
+enum class ColorScheme { Unknown = 0, Light = 1, Dark = 2 };
+static ColorScheme s_colorScheme = ColorScheme::Unknown;
+
 static void push_window_metrics_to_js() {
   if (!s_hermesApp || !s_hermesApp->hermes) {
     return;
@@ -331,6 +348,761 @@ static void push_window_metrics_to_js() {
     slog_func("ERROR", 1, 0, error.what(), __LINE__, __FILE__, nullptr);
   } catch (const std::exception &error) {
     slog_func("ERROR", 1, 0, error.what(), __LINE__, __FILE__, nullptr);
+  }
+}
+
+static void push_color_scheme_to_js(ColorScheme scheme) {
+  if (!s_hermesApp || !s_hermesApp->hermes) {
+    return;
+  }
+
+  try {
+    auto &runtime = *s_hermesApp->hermes;
+    auto global = runtime.global();
+    if (!global.hasProperty(runtime, "__setColorScheme")) {
+      return;
+    }
+
+    const char *label = "unknown";
+    switch (scheme) {
+    case ColorScheme::Dark:
+      label = "dark";
+      break;
+    case ColorScheme::Light:
+      label = "light";
+      break;
+    default:
+      label = "unknown";
+      break;
+    }
+
+    auto labelValue = facebook::jsi::String::createFromUtf8(runtime, label);
+    global.getPropertyAsFunction(runtime, "__setColorScheme")
+        .call(runtime, std::move(labelValue));
+  } catch (const facebook::jsi::JSIException &error) {
+    slog_func("ERROR", 1, 0, error.what(), __LINE__, __FILE__, nullptr);
+  } catch (const std::exception &error) {
+    slog_func("ERROR", 1, 0, error.what(), __LINE__, __FILE__, nullptr);
+  }
+}
+
+static ColorScheme detect_system_color_scheme() {
+#if defined(__APPLE__)
+  ColorScheme scheme = ColorScheme::Light;
+  CFStringRef key = CFSTR("AppleInterfaceStyle");
+  CFStringRef appId = CFSTR(".GlobalPreferences");
+  CFPropertyListRef value = CFPreferencesCopyAppValue(key, appId);
+  if (value) {
+    if (CFGetTypeID(value) == CFStringGetTypeID()) {
+      if (CFStringCompare(static_cast<CFStringRef>(value), CFSTR("Dark"),
+                          kCFCompareCaseInsensitive) == kCFCompareEqualTo) {
+        scheme = ColorScheme::Dark;
+      }
+    }
+    CFRelease(value);
+  }
+  return scheme;
+#elif defined(_WIN32)
+  constexpr wchar_t kPersonalizeKey[] =
+      L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize";
+  DWORD value = 1;
+  DWORD valueSize = sizeof(DWORD);
+  HKEY key;
+  if (RegOpenKeyExW(HKEY_CURRENT_USER, kPersonalizeKey, 0, KEY_READ, &key) ==
+      ERROR_SUCCESS) {
+    DWORD appsUseLightTheme = 1;
+    valueSize = sizeof(DWORD);
+    if (RegQueryValueExW(key, L"AppsUseLightTheme", nullptr, nullptr,
+                         reinterpret_cast<LPBYTE>(&appsUseLightTheme),
+                         &valueSize) == ERROR_SUCCESS) {
+      RegCloseKey(key);
+      return appsUseLightTheme == 0 ? ColorScheme::Dark : ColorScheme::Light;
+    }
+    RegCloseKey(key);
+  }
+  return ColorScheme::Light;
+#else
+  const char *env = std::getenv("IMG_UI_COLOR_SCHEME");
+  if (env) {
+    std::string value(env);
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    if (value == "dark") {
+      return ColorScheme::Dark;
+    }
+    if (value == "light") {
+      return ColorScheme::Light;
+    }
+  }
+  return ColorScheme::Light;
+#endif
+}
+
+static void update_color_scheme_state(bool force = false) {
+  ColorScheme detected = detect_system_color_scheme();
+  if (force || detected != s_colorScheme) {
+    s_colorScheme = detected;
+    push_color_scheme_to_js(detected);
+  }
+}
+
+static void destroy_font_resources() {
+  if (s_fontAtlasValid) {
+    simgui_destroy_image(s_fontAtlasHandle);
+    if (s_fontAtlasImage.id != SG_INVALID_ID) {
+      sg_destroy_image(s_fontAtlasImage);
+    }
+    s_fontAtlasHandle.id = 0;
+    s_fontAtlasImage.id = SG_INVALID_ID;
+    s_fontAtlasValid = false;
+  }
+
+  s_fontBlobs.clear();
+  s_fontRangeBuffers.clear();
+  s_registeredFonts.clear();
+  s_defaultFont = nullptr;
+}
+
+static void rebuild_default_font_state(float fallbackGlobalScale) {
+  ImGuiIO &io = ImGui::GetIO();
+  io.FontGlobalScale = fallbackGlobalScale;
+
+  io.Fonts->Clear();
+  io.Fonts->ClearTexData();
+  io.Fonts->ClearFonts();
+
+  s_fontBlobs.clear();
+  s_fontRangeBuffers.clear();
+  s_registeredFonts.clear();
+  s_defaultFont = nullptr;
+  s_fontAtlasValid = false;
+  s_fontAtlasHandle.id = 0;
+  s_fontAtlasImage.id = SG_INVALID_ID;
+
+  ImFont *font = io.Fonts->AddFontDefault();
+  if (!font) {
+    return;
+  }
+
+  if (!io.Fonts->Build()) {
+    return;
+  }
+
+  unsigned char *pixels = nullptr;
+  int width = 0;
+  int height = 0;
+  io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
+
+  sg_image_desc imageDesc = {};
+  imageDesc.width = width;
+  imageDesc.height = height;
+  imageDesc.pixel_format = SG_PIXELFORMAT_RGBA8;
+  imageDesc.usage = SG_USAGE_IMMUTABLE;
+  imageDesc.data.subimage[0][0].ptr = pixels;
+  imageDesc.data.subimage[0][0].size = static_cast<size_t>(width) * height * 4;
+  imageDesc.label = "react-imgui-font-atlas";
+
+  s_fontAtlasImage = sg_make_image(&imageDesc);
+  if (s_fontAtlasImage.id == SG_INVALID_ID) {
+    return;
+  }
+
+  simgui_image_desc_t simDesc = {};
+  simDesc.image = s_fontAtlasImage;
+  simDesc.sampler = s_sampler;
+  s_fontAtlasHandle = simgui_make_image(&simDesc);
+  if (!s_fontAtlasHandle.id) {
+    sg_destroy_image(s_fontAtlasImage);
+    s_fontAtlasImage.id = SG_INVALID_ID;
+    return;
+  }
+
+  s_fontAtlasValid = true;
+  io.Fonts->TexID = simgui_imtextureid(s_fontAtlasHandle);
+  s_defaultFont = font;
+}
+
+static bool read_file_bytes(const std::string &path, std::vector<uint8_t> &out) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in.is_open()) {
+    return false;
+  }
+  in.seekg(0, std::ios::end);
+  auto size = static_cast<std::streamoff>(in.tellg());
+  if (size <= 0) {
+    return false;
+  }
+  in.seekg(0, std::ios::beg);
+  out.resize(static_cast<size_t>(size));
+  in.read(reinterpret_cast<char *>(out.data()), size);
+  return static_cast<std::streamoff>(in.gcount()) == size;
+}
+
+static bool load_system_emoji_font(std::vector<uint8_t> &out, std::string &usedPath) {
+#if defined(__APPLE__)
+  static const char *kCandidates[] = {
+      "/System/Library/Fonts/Apple Color Emoji.ttf",
+      "/System/Library/Fonts/AppleColorEmoji.ttf"};
+#elif defined(_WIN32)
+  static const char *kCandidates[] = {
+      "C:/Windows/Fonts/seguiemj.ttf",
+      "C:/Windows/Fonts/SegoeUIEmoji.ttf"};
+#else
+  static const char *kCandidates[] = {
+      "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
+      "/usr/share/fonts/emoji/NotoColorEmoji.ttf",
+      "/usr/share/fonts/truetype/joypixels/JoyPixels.ttf",
+      "/usr/share/fonts/truetype/emojione/EmojiOneColor.ttf"};
+#endif
+
+  for (const char *candidate : kCandidates) {
+    if (candidate == nullptr) {
+      continue;
+    }
+    std::vector<uint8_t> buffer;
+    if (read_file_bytes(candidate, buffer)) {
+      out = std::move(buffer);
+      usedPath = candidate;
+      return true;
+    }
+  }
+  return false;
+}
+
+static void add_glyph_preset(const std::string &preset, ImFontAtlas &atlas,
+                              ImFontGlyphRangesBuilder &builder,
+                              bool &usedBuilder) {
+  std::string lower = preset;
+  std::transform(lower.begin(), lower.end(), lower.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
+
+  if (lower == "default") {
+    builder.AddRanges(atlas.GetGlyphRangesDefault());
+    usedBuilder = true;
+  } else if (lower == "latin") {
+    builder.AddRanges(atlas.GetGlyphRangesDefault());
+    usedBuilder = true;
+  } else if (lower == "cyrillic") {
+    builder.AddRanges(atlas.GetGlyphRangesCyrillic());
+    usedBuilder = true;
+  } else if (lower == "japanese") {
+    builder.AddRanges(atlas.GetGlyphRangesJapanese());
+    usedBuilder = true;
+  } else if (lower == "korean") {
+    builder.AddRanges(atlas.GetGlyphRangesKorean());
+    usedBuilder = true;
+  } else if (lower == "chinese" || lower == "chinese_full") {
+    builder.AddRanges(atlas.GetGlyphRangesChineseFull());
+    usedBuilder = true;
+  } else if (lower == "chinese_simplified" ||
+             lower == "chinese_simplified_common") {
+    builder.AddRanges(atlas.GetGlyphRangesChineseSimplifiedCommon());
+    usedBuilder = true;
+  } else if (lower == "thai") {
+    builder.AddRanges(atlas.GetGlyphRangesThai());
+    usedBuilder = true;
+  } else if (lower == "vietnamese") {
+    builder.AddRanges(atlas.GetGlyphRangesVietnamese());
+    usedBuilder = true;
+  } else if (lower == "emoji") {
+    usedBuilder = true;
+    const std::array<std::pair<ImWchar, ImWchar>, 5> ranges = {{{0x1F300, 0x1F6FF},
+                                                                {0x1F900, 0x1F9FF},
+                                                                {0x2600, 0x27BF},
+                                                                {0x1FA70, 0x1FAFF},
+                                                                {0xFE0F, 0xFE0F}}};
+    for (const auto &[start, end] : ranges) {
+      std::array<ImWchar, 3> range = {start, end, 0};
+      builder.AddRanges(range.data());
+    }
+  }
+}
+
+static bool copy_array_buffer(facebook::jsi::Runtime &runtime,
+                              const facebook::jsi::Value &value,
+                              std::vector<uint8_t> &out) {
+  if (!value.isObject()) {
+    return false;
+  }
+
+  auto obj = value.asObject(runtime);
+  if (obj.isArrayBuffer(runtime)) {
+    auto buffer = obj.getArrayBuffer(runtime);
+    const auto *begin = static_cast<const uint8_t *>(buffer.data(runtime));
+    out.assign(begin, begin + buffer.size(runtime));
+    return true;
+  }
+
+  if (obj.hasProperty(runtime, "buffer")) {
+    auto bufferVal = obj.getProperty(runtime, "buffer");
+    if (bufferVal.isObject()) {
+      auto bufferObj = bufferVal.asObject(runtime);
+      if (bufferObj.isArrayBuffer(runtime)) {
+        auto arrayBuffer = bufferObj.getArrayBuffer(runtime);
+        const auto *base = static_cast<const uint8_t *>(arrayBuffer.data(runtime));
+        size_t baseSize = arrayBuffer.size(runtime);
+
+        size_t offset = 0;
+        size_t length = baseSize;
+
+        if (obj.hasProperty(runtime, "byteOffset")) {
+          auto offsetVal = obj.getProperty(runtime, "byteOffset");
+          if (offsetVal.isNumber()) {
+            double value = offsetVal.getNumber();
+            if (std::isfinite(value) && value >= 0.0) {
+              offset = std::min(static_cast<size_t>(value), baseSize);
+            }
+          }
+        }
+
+        if (obj.hasProperty(runtime, "byteLength")) {
+          auto lengthVal = obj.getProperty(runtime, "byteLength");
+          if (lengthVal.isNumber()) {
+            double value = lengthVal.getNumber();
+            if (std::isfinite(value) && value >= 0.0) {
+              length = static_cast<size_t>(value);
+            }
+          }
+        }
+
+        if (offset > baseSize) {
+          offset = baseSize;
+        }
+        if (length > baseSize - offset) {
+          length = baseSize - offset;
+        }
+
+        out.assign(base + offset, base + offset + length);
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+static facebook::jsi::Value
+configure_fonts_host(facebook::jsi::Runtime &runtime,
+                     const facebook::jsi::Value & /*thisValue*/,
+                     const facebook::jsi::Value *args, size_t count) {
+  if (count < 1 || !args[0].isObject()) {
+    throw facebook::jsi::JSError(runtime,
+                                 "configureFonts expects an array of fonts");
+  }
+
+  auto fontArrayObj = args[0].asObject(runtime);
+  if (!fontArrayObj.isArray(runtime)) {
+    throw facebook::jsi::JSError(runtime,
+                                 "configureFonts first argument must be an array");
+  }
+
+  facebook::jsi::Array fontArray = fontArrayObj.asArray(runtime);
+  size_t fontCount = fontArray.size(runtime);
+  if (fontCount == 0) {
+    throw facebook::jsi::JSError(runtime,
+                                 "configureFonts requires at least one font");
+  }
+
+  struct FontRequest {
+    enum class Source { Memory, File, Default, SystemEmoji };
+    std::string name;
+    Source source = Source::Memory;
+    float size = 16.0f;
+    bool merge = false;
+    bool pixelSnap = false;
+    int oversampleH = 3;
+    int oversampleV = 1;
+    float rasterizerMultiply = 1.0f;
+    ImVec2 glyphOffset{0.0f, 0.0f};
+    std::string path;
+    std::vector<uint8_t> data;
+    std::vector<std::string> presets;
+    std::vector<ImWchar> explicitRanges;
+  };
+
+  std::vector<FontRequest> requests;
+  requests.reserve(fontCount);
+
+  for (size_t i = 0; i < fontCount; ++i) {
+    auto value = fontArray.getValueAtIndex(runtime, i);
+    if (!value.isObject()) {
+      throw facebook::jsi::JSError(runtime, "Font descriptor must be an object");
+    }
+
+    auto descriptor = value.asObject(runtime);
+    FontRequest request;
+
+    if (!descriptor.hasProperty(runtime, "name") ||
+        !descriptor.getProperty(runtime, "name").isString()) {
+      throw facebook::jsi::JSError(runtime, "Font descriptor requires a name");
+    }
+    request.name = descriptor.getProperty(runtime, "name").asString(runtime).utf8(runtime);
+
+    if (descriptor.hasProperty(runtime, "size")) {
+      auto sizeVal = descriptor.getProperty(runtime, "size");
+      if (!sizeVal.isNumber()) {
+        throw facebook::jsi::JSError(runtime, "Font size must be a number");
+      }
+      request.size = static_cast<float>(sizeVal.getNumber());
+      if (request.size <= 0.0f) {
+        request.size = 16.0f;
+      }
+    }
+
+    if (descriptor.hasProperty(runtime, "merge")) {
+      request.merge = descriptor.getProperty(runtime, "merge").getBool();
+    }
+    if (descriptor.hasProperty(runtime, "pixelSnap")) {
+      request.pixelSnap = descriptor.getProperty(runtime, "pixelSnap").getBool();
+    }
+    if (descriptor.hasProperty(runtime, "rasterizerMultiply")) {
+      auto val = descriptor.getProperty(runtime, "rasterizerMultiply");
+      if (val.isNumber()) {
+        request.rasterizerMultiply = std::max(0.001f, static_cast<float>(val.getNumber()));
+      }
+    }
+
+    if (descriptor.hasProperty(runtime, "glyphOffset")) {
+      auto offsetVal = descriptor.getProperty(runtime, "glyphOffset");
+      if (offsetVal.isObject()) {
+        auto offsetObj = offsetVal.asObject(runtime);
+        if (offsetObj.hasProperty(runtime, "x")) {
+          auto xVal = offsetObj.getProperty(runtime, "x");
+          if (xVal.isNumber()) {
+            request.glyphOffset.x = static_cast<float>(xVal.getNumber());
+          }
+        }
+        if (offsetObj.hasProperty(runtime, "y")) {
+          auto yVal = offsetObj.getProperty(runtime, "y");
+          if (yVal.isNumber()) {
+            request.glyphOffset.y = static_cast<float>(yVal.getNumber());
+          }
+        }
+      }
+    }
+
+    if (descriptor.hasProperty(runtime, "oversample")) {
+      auto overVal = descriptor.getProperty(runtime, "oversample");
+      if (overVal.isObject()) {
+        auto overObj = overVal.asObject(runtime);
+        if (overObj.hasProperty(runtime, "x")) {
+          auto xVal = overObj.getProperty(runtime, "x");
+          if (xVal.isNumber()) {
+            request.oversampleH = std::max(1, static_cast<int>(xVal.getNumber()));
+          }
+        }
+        if (overObj.hasProperty(runtime, "y")) {
+          auto yVal = overObj.getProperty(runtime, "y");
+          if (yVal.isNumber()) {
+            request.oversampleV = std::max(1, static_cast<int>(yVal.getNumber()));
+          }
+        }
+      }
+    }
+
+    if (descriptor.hasProperty(runtime, "glyphPresets")) {
+      auto presetsVal = descriptor.getProperty(runtime, "glyphPresets");
+      if (presetsVal.isObject()) {
+        auto presetsObj = presetsVal.asObject(runtime);
+        if (presetsObj.isArray(runtime)) {
+          facebook::jsi::Array presets = presetsObj.asArray(runtime);
+          size_t presetCount = presets.size(runtime);
+          for (size_t p = 0; p < presetCount; ++p) {
+            auto presetVal = presets.getValueAtIndex(runtime, p);
+            if (presetVal.isString()) {
+              request.presets.emplace_back(
+                  presetVal.asString(runtime).utf8(runtime));
+            }
+          }
+        }
+      }
+    }
+
+    if (descriptor.hasProperty(runtime, "glyphRanges")) {
+      auto rangesVal = descriptor.getProperty(runtime, "glyphRanges");
+      if (rangesVal.isObject()) {
+        auto rangesObj = rangesVal.asObject(runtime);
+        if (rangesObj.isArray(runtime)) {
+          facebook::jsi::Array rangeArray = rangesObj.asArray(runtime);
+          size_t rangeCount = rangeArray.size(runtime);
+          request.explicitRanges.reserve(rangeCount);
+          for (size_t r = 0; r < rangeCount; ++r) {
+            auto rangeVal = rangeArray.getValueAtIndex(runtime, r);
+            if (rangeVal.isNumber()) {
+              double number = rangeVal.getNumber();
+              if (std::isnan(number)) {
+                continue;
+              }
+              ImWchar ch = static_cast<ImWchar>(std::clamp(number, 0.0, 65535.0));
+              request.explicitRanges.push_back(ch);
+            }
+          }
+        }
+      }
+    }
+
+    bool hasData = false;
+    if (descriptor.hasProperty(runtime, "data")) {
+      auto dataVal = descriptor.getProperty(runtime, "data");
+      hasData = copy_array_buffer(runtime, dataVal, request.data);
+    }
+
+    if (descriptor.hasProperty(runtime, "path")) {
+      auto pathVal = descriptor.getProperty(runtime, "path");
+      if (pathVal.isString()) {
+        request.path = pathVal.asString(runtime).utf8(runtime);
+      }
+    }
+
+    if (descriptor.hasProperty(runtime, "source")) {
+      auto sourceVal = descriptor.getProperty(runtime, "source");
+      if (sourceVal.isString()) {
+        std::string source = sourceVal.asString(runtime).utf8(runtime);
+        std::string lower = source;
+        std::transform(lower.begin(), lower.end(), lower.begin(),
+                       [](unsigned char c) { return std::tolower(c); });
+        if (lower == "imgui-default" || lower == "default") {
+          request.source = FontRequest::Source::Default;
+        } else if (lower == "system-emoji" || lower == "emoji") {
+          request.source = FontRequest::Source::SystemEmoji;
+        } else if (lower == "file") {
+          request.source = FontRequest::Source::File;
+        } else if (lower == "memory") {
+          request.source = FontRequest::Source::Memory;
+        } else {
+          request.source = FontRequest::Source::Memory;
+        }
+      }
+    } else if (!request.path.empty()) {
+      request.source = FontRequest::Source::File;
+    } else if (hasData) {
+      request.source = FontRequest::Source::Memory;
+    }
+
+    if (request.source == FontRequest::Source::Memory && request.data.empty()) {
+      throw facebook::jsi::JSError(runtime,
+                                   "Font descriptor missing binary data");
+    }
+    if (request.source == FontRequest::Source::File && request.path.empty()) {
+      throw facebook::jsi::JSError(runtime,
+                                   "Font descriptor requires a path for file source");
+    }
+
+    requests.push_back(std::move(request));
+  }
+
+  for (auto &request : requests) {
+    if (request.source == FontRequest::Source::File) {
+      std::vector<uint8_t> fileData;
+      if (!read_file_bytes(request.path, fileData)) {
+        throw facebook::jsi::JSError(runtime,
+                                     "Failed to read font file: " +
+                                         request.path);
+      }
+      request.data = std::move(fileData);
+      request.source = FontRequest::Source::Memory;
+    } else if (request.source == FontRequest::Source::SystemEmoji) {
+      std::string usedPath;
+      std::vector<uint8_t> emojiData;
+      if (!load_system_emoji_font(emojiData, usedPath)) {
+        throw facebook::jsi::JSError(runtime,
+                                     "Failed to locate system emoji font");
+      }
+      request.data = std::move(emojiData);
+      request.source = FontRequest::Source::Memory;
+    }
+  }
+
+  std::string defaultFontName;
+  float globalScale = s_fontGlobalScale;
+  if (count >= 2 && args[1].isObject()) {
+    auto options = args[1].asObject(runtime);
+    if (options.hasProperty(runtime, "defaultFont")) {
+      auto df = options.getProperty(runtime, "defaultFont");
+      if (df.isString()) {
+        defaultFontName = df.asString(runtime).utf8(runtime);
+      }
+    }
+    if (options.hasProperty(runtime, "globalScale")) {
+      auto gs = options.getProperty(runtime, "globalScale");
+      if (gs.isNumber()) {
+        double value = gs.getNumber();
+        if (std::isfinite(value) && value > 0.0) {
+          globalScale = static_cast<float>(value);
+        }
+      }
+    }
+  }
+
+  float previousGlobalScale = s_fontGlobalScale;
+  destroy_font_resources();
+
+  ImGuiIO &io = ImGui::GetIO();
+
+  auto rebuildOnFailure = [&]() {
+    rebuild_default_font_state(previousGlobalScale);
+  };
+
+  try {
+    io.FontGlobalScale = globalScale;
+    io.Fonts->Clear();
+    io.Fonts->ClearTexData();
+    io.Fonts->ClearFonts();
+
+    s_fontBlobs.clear();
+    s_fontRangeBuffers.clear();
+    s_registeredFonts.clear();
+    s_fontBlobs.reserve(requests.size());
+    s_fontRangeBuffers.reserve(requests.size());
+
+    ImFont *defaultFontPtr = nullptr;
+
+    for (auto &request : requests) {
+      ImFontConfig config;
+      config.FontDataOwnedByAtlas = false;
+      config.MergeMode = request.merge;
+      config.PixelSnapH = request.pixelSnap;
+      config.OversampleH = request.oversampleH;
+      config.OversampleV = request.oversampleV;
+      config.RasterizerMultiply = request.rasterizerMultiply;
+      config.GlyphOffset = request.glyphOffset;
+      config.SizePixels = request.size;
+      std::snprintf(config.Name, IM_ARRAYSIZE(config.Name), "%s",
+                    request.name.c_str());
+
+      const ImWchar *glyphRanges = nullptr;
+      bool usedBuilder = false;
+      ImFontGlyphRangesBuilder builder;
+      for (const auto &preset : request.presets) {
+        add_glyph_preset(preset, *io.Fonts, builder, usedBuilder);
+      }
+      if (!request.explicitRanges.empty()) {
+        usedBuilder = true;
+        for (size_t idx = 0; idx + 1 < request.explicitRanges.size(); idx += 2) {
+          ImWchar start = request.explicitRanges[idx];
+          ImWchar end = request.explicitRanges[idx + 1];
+          if (end < start) {
+            std::swap(start, end);
+          }
+          std::array<ImWchar, 3> range = {start, end, 0};
+          builder.AddRanges(range.data());
+        }
+      }
+
+      if (usedBuilder) {
+        auto &buffer = s_fontRangeBuffers.emplace_back();
+        builder.BuildRanges(&buffer);
+        glyphRanges = buffer.Data;
+      }
+
+      config.GlyphRanges = glyphRanges;
+
+      ImFont *fontPtr = nullptr;
+      switch (request.source) {
+      case FontRequest::Source::Default: {
+        fontPtr = io.Fonts->AddFontDefault(&config);
+        break;
+      }
+      case FontRequest::Source::File:
+      case FontRequest::Source::SystemEmoji:
+      case FontRequest::Source::Memory: {
+        s_fontBlobs.push_back(std::move(request.data));
+        auto &blob = s_fontBlobs.back();
+        fontPtr = io.Fonts->AddFontFromMemoryTTF(
+            blob.data(), static_cast<int>(blob.size()), request.size, &config,
+            glyphRanges);
+        break;
+      }
+      }
+
+      if (!fontPtr) {
+        throw facebook::jsi::JSError(runtime,
+                                     "Failed to load font: " + request.name);
+      }
+
+      s_registeredFonts[request.name] = fontPtr;
+      if (defaultFontName.empty()) {
+        defaultFontPtr = defaultFontPtr ? defaultFontPtr : fontPtr;
+      } else if (request.name == defaultFontName) {
+        defaultFontPtr = fontPtr;
+      }
+    }
+
+    if (!defaultFontPtr && !s_registeredFonts.empty()) {
+      defaultFontPtr = s_registeredFonts.begin()->second;
+    }
+
+    if (!io.Fonts->Build()) {
+      throw facebook::jsi::JSError(runtime, "ImGui failed to build font atlas");
+    }
+
+    unsigned char *pixels = nullptr;
+    int width = 0;
+    int height = 0;
+    io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
+
+    sg_image_desc imageDesc = {};
+    imageDesc.width = width;
+    imageDesc.height = height;
+    imageDesc.pixel_format = SG_PIXELFORMAT_RGBA8;
+    imageDesc.usage = SG_USAGE_IMMUTABLE;
+    imageDesc.data.subimage[0][0].ptr = pixels;
+    imageDesc.data.subimage[0][0].size = static_cast<size_t>(width) * height * 4;
+    imageDesc.label = "react-imgui-font-atlas";
+
+    s_fontAtlasImage = sg_make_image(&imageDesc);
+    if (s_fontAtlasImage.id == SG_INVALID_ID) {
+      throw facebook::jsi::JSError(runtime,
+                                   "Failed to create font atlas image");
+    }
+
+    simgui_image_desc_t simDesc = {};
+    simDesc.image = s_fontAtlasImage;
+    simDesc.sampler = s_sampler;
+    s_fontAtlasHandle = simgui_make_image(&simDesc);
+    if (!s_fontAtlasHandle.id) {
+      sg_destroy_image(s_fontAtlasImage);
+      s_fontAtlasImage.id = SG_INVALID_ID;
+      throw facebook::jsi::JSError(runtime,
+                                   "Failed to register font atlas with ImGui");
+    }
+    s_fontAtlasValid = true;
+
+    io.Fonts->TexID = simgui_imtextureid(s_fontAtlasHandle);
+
+    if (defaultFontPtr) {
+      io.FontDefault = defaultFontPtr;
+    }
+    s_defaultFont = defaultFontPtr;
+    s_fontGlobalScale = globalScale;
+
+    facebook::jsi::Object result(runtime);
+    facebook::jsi::Object fontHandles(runtime);
+
+    for (const auto &entry : s_registeredFonts) {
+      double handleValue = static_cast<double>(
+          reinterpret_cast<uintptr_t>(entry.second));
+      fontHandles.setProperty(
+          runtime, facebook::jsi::String::createFromUtf8(runtime, entry.first),
+          handleValue);
+    }
+
+    result.setProperty(runtime, "fonts", fontHandles);
+    result.setProperty(runtime, "atlasWidth", static_cast<double>(width));
+    result.setProperty(runtime, "atlasHeight", static_cast<double>(height));
+    result.setProperty(runtime, "globalScale", static_cast<double>(globalScale));
+
+    if (defaultFontPtr) {
+      double defaultHandle = static_cast<double>(
+          reinterpret_cast<uintptr_t>(defaultFontPtr));
+      result.setProperty(runtime, "defaultFont", defaultHandle);
+    }
+
+    return result;
+  } catch (...) {
+    rebuildOnFailure();
+    s_fontGlobalScale = previousGlobalScale;
+    throw;
   }
 }
 
@@ -2185,6 +2957,7 @@ static void app_init() {
         .call(*s_hermesApp->hermes);
     s_hermesApp->hermes->drainMicrotasks();
     push_window_metrics_to_js();
+    update_color_scheme_state(true);
   } catch (facebook::jsi::JSIException &e) {
     slog_func("ERROR", 1, 0, e.what(), __LINE__, __FILE__, nullptr);
     abort();
@@ -2265,6 +3038,7 @@ static void app_frame() {
 
   maybe_handle_hot_reload();
   push_window_metrics_to_js();
+  update_color_scheme_state();
 
   if (!s_started) {
     s_started = true;
@@ -2537,6 +3311,13 @@ sapp_desc sokol_main(int argc, char *argv[]) {
       2, configure_navigation_host);
   hermes->global().setProperty(*hermes, "__configureImGuiNavigation",
                                navConfigureFn);
+
+  auto fontConfigureFn = facebook::jsi::Function::createFromHostFunction(
+    *hermes,
+    facebook::jsi::PropNameID::forAscii(*hermes, "__configureImGuiFonts"), 2,
+    configure_fonts_host);
+  hermes->global().setProperty(*hermes, "__configureImGuiFonts",
+                 fontConfigureFn);
 
   update_navigation_state_js(*hermes);
 
