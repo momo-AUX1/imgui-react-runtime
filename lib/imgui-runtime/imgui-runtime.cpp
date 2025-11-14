@@ -21,6 +21,12 @@
 #include <TargetConditionals.h>
 #include <sys/sysctl.h>
 #include <CoreFoundation/CoreFoundation.h>
+#if TARGET_OS_OSX
+#include <objc/NSObjCRuntime.h>
+#include <objc/objc.h>
+#include <objc/message.h>
+#include <objc/runtime.h>
+#endif
 #endif
 
 #if defined(_WIN32)
@@ -98,6 +104,7 @@ static sg_sampler s_sampler = {};
 static bool s_navKeyboardEnabled = true;
 static bool s_navGamepadEnabled = true;
 static double s_runtimeStartMs = 0.0;
+static bool s_windowResizable = true;
 
 static void apply_navigation_config() {
   if (ImGui::GetCurrentContext() == nullptr) {
@@ -130,6 +137,37 @@ static void update_navigation_state_js(facebook::jsi::Runtime &runtime) {
   } catch (...) {
     // Ignore synchronization errors to avoid disrupting rendering.
   }
+}
+
+static void apply_window_resizable_state() {
+#if defined(__APPLE__) && TARGET_OS_OSX
+  if (!s_windowResizable) {
+    const void *windowPtr = sapp_macos_get_window();
+    if (windowPtr) {
+      id window = (id)windowPtr;
+      auto getMask = reinterpret_cast<NSUInteger (*)(id, SEL)>(objc_msgSend);
+      auto setMask = reinterpret_cast<void (*)(id, SEL, NSUInteger)>(objc_msgSend);
+      SEL styleMaskSel = sel_registerName("styleMask");
+      SEL setStyleMaskSel = sel_registerName("setStyleMask:");
+      NSUInteger mask = getMask(window, styleMaskSel);
+      constexpr NSUInteger NSWindowStyleMaskResizable = (1ULL << 3);
+      mask &= ~NSWindowStyleMaskResizable;
+      setMask(window, setStyleMaskSel, mask);
+    }
+  }
+#elif defined(_WIN32)
+  if (!s_windowResizable) {
+    HWND hwnd = (HWND)sapp_win32_get_hwnd();
+    if (hwnd) {
+      LONG style = GetWindowLong(hwnd, GWL_STYLE);
+      style &= ~WS_THICKFRAME;
+      style &= ~WS_MAXIMIZEBOX;
+      SetWindowLong(hwnd, GWL_STYLE, style);
+    }
+  }
+#else
+  (void)s_windowResizable;
+#endif
 }
 
 static facebook::jsi::Value
@@ -2954,6 +2992,7 @@ static void app_init() {
   sdtx_desc_t sdtx_desc = {.fonts = {sdtx_font_kc854()},
                            .logger.func = slog_func};
   sdtx_setup(&sdtx_desc);
+  apply_window_resizable_state();
 
   try {
     s_hermesApp->hermes->global()
@@ -3144,6 +3183,7 @@ static int safe_double_to_int(double value, int defaultValue) {
 /// Populate sapp_desc from globalThis.sappConfig
 static void populate_sapp_desc_from_config(facebook::hermes::HermesRuntime *hermes) {
   sapp_desc desc = {};
+  bool windowResizableValue = true;
 
   // Set callbacks
   desc.init_cb = app_init;
@@ -3174,6 +3214,8 @@ static void populate_sapp_desc_from_config(facebook::hermes::HermesRuntime *herm
       auto value = config.getProperty(*hermes, js_name); \
       if (value.isBool()) { \
         desc.field = value.asBool(); \
+      } else if (value.isNumber()) { \
+        desc.field = value.asNumber() != 0.0; \
       } \
     }
 
@@ -3188,6 +3230,15 @@ static void populate_sapp_desc_from_config(facebook::hermes::HermesRuntime *herm
       }
     }
 
+    if (config.hasProperty(*hermes, "html5_canvas_name")) {
+      auto canvasNameValue = config.getProperty(*hermes, "html5_canvas_name");
+      if (canvasNameValue.isString()) {
+        static std::string canvasNameStorage;
+        canvasNameStorage = canvasNameValue.asString(*hermes).utf8(*hermes);
+        desc.html5_canvas_name = canvasNameStorage.c_str();
+      }
+    }
+
     // Read int fields
     READ_INT_PROP("width", width, 0);
     READ_INT_PROP("height", height, 0);
@@ -3196,6 +3247,8 @@ static void populate_sapp_desc_from_config(facebook::hermes::HermesRuntime *herm
     READ_INT_PROP("clipboard_size", clipboard_size, 8192);
     READ_INT_PROP("max_dropped_files", max_dropped_files, 1);
     READ_INT_PROP("max_dropped_file_path_length", max_dropped_file_path_length, 2048);
+    READ_INT_PROP("gl_major_version", gl_major_version, 3);
+    READ_INT_PROP("gl_minor_version", gl_minor_version, 3);
 
     // Read bool fields
     READ_BOOL_PROP("fullscreen", fullscreen);
@@ -3203,6 +3256,14 @@ static void populate_sapp_desc_from_config(facebook::hermes::HermesRuntime *herm
     READ_BOOL_PROP("alpha", alpha);
     READ_BOOL_PROP("enable_clipboard", enable_clipboard);
     READ_BOOL_PROP("enable_dragndrop", enable_dragndrop);
+    READ_BOOL_PROP("html5_canvas_resize", html5_canvas_resize);
+    READ_BOOL_PROP("html5_preserve_drawing_buffer", html5_preserve_drawing_buffer);
+    READ_BOOL_PROP("html5_premultiplied_alpha", html5_premultiplied_alpha);
+    READ_BOOL_PROP("html5_ask_leave_site", html5_ask_leave_site);
+    READ_BOOL_PROP("ios_keyboard_resizes_canvas", ios_keyboard_resizes_canvas);
+    READ_BOOL_PROP("win32_console_utf8", win32_console_utf8);
+    READ_BOOL_PROP("win32_console_create", win32_console_create);
+    READ_BOOL_PROP("win32_console_attach", win32_console_attach);
 
     // Load window icon if provided
     if (config.hasProperty(*hermes, "iconPath")) {
@@ -3263,11 +3324,41 @@ static void populate_sapp_desc_from_config(facebook::hermes::HermesRuntime *herm
       }
     }
 
+    // Handle window resizable overrides
+    auto readBoolLikeValue = [&](const facebook::jsi::Value &value, bool &outValue,
+                                 bool &wasSet) {
+      if (value.isBool()) {
+        outValue = value.asBool();
+        wasSet = true;
+      } else if (value.isNumber()) {
+        outValue = value.asNumber() != 0.0;
+        wasSet = true;
+      }
+    };
+
+    bool hasWindowResizable = false;
+    if (config.hasProperty(*hermes, "window_resizable")) {
+      auto value = config.getProperty(*hermes, "window_resizable");
+      readBoolLikeValue(value, windowResizableValue, hasWindowResizable);
+    }
+
+    bool nonresizeValue = false;
+    bool hasNonresize = false;
+    if (config.hasProperty(*hermes, "nonresize")) {
+      auto value = config.getProperty(*hermes, "nonresize");
+      readBoolLikeValue(value, nonresizeValue, hasNonresize);
+    }
+
+    if (hasNonresize) {
+      windowResizableValue = !nonresizeValue;
+    }
+
 #undef READ_INT_PROP
 #undef READ_BOOL_PROP
   }
 
   s_app_desc = desc;
+  s_windowResizable = windowResizableValue;
 }
 
 /// jslib-unit initialization.
