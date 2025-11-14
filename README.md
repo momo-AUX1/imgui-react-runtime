@@ -77,6 +77,28 @@ _**Note**: This project is an independent experiment and is not affiliated with,
 - ✅ **Fullscreen root canvas** for background elements and overlays
 - ✅ **Three-unit architecture** separating event loop, React logic, and ImGui rendering
 
+## Runtime status (November 2025 update)
+
+We've just landed the largest runtime refresh since the project launched. Highlights:
+
+- **Turnkey `configureSapp` pipeline** – `test/index.js` and all CLI templates now share the same helper so you can toggle advanced Sokol flags (clipboard, drag-and-drop, HTML5 canvas settings, GL versions, Win32 console behavior, and more) using ergonomic React-friendly props.
+- **Cross-platform window locking** – Setting `resizable: false` or `nonresize: true` in JS now propagates all the way to macOS and Win32, removing the resize chrome at the native level instead of relying on ImGui hints.
+- **Runtime-driven defaults** – `globalThis.sappConfig` is initialized automatically with sane defaults, and any overrides are parsed with validation (ints, bools, strings) before Sokol bootstraps so your release builds stay deterministic.
+- **CLI parity** – `react-imgui create` emits the same entrypoint used by the test harness, so every new project inherits the extended config surface with no manual copy/paste.
+- **Almost-complete ImGui surface** – The reconciler now exports practically every Dear ImGui widget (text inputs, sliders, drags, tables, docking, popups, plotting, etc.), plus `<Image>`/`<ImageButton>` for texture-backed UI elements—leaving only high-level texture/asset helpers on the wishlist.
+
+### Is it production ready?
+
+It's **still an experimental runtime**, but it's dramatically more complete than the original preview:
+
+- ✅ Stable release builds (native React + Hermes) with repeatable window behavior and icon loading
+- ✅ Feature-parity between the sample app and generated projects, so what you prototype matches what you scaffold
+- ⚠️ Missing many React Native conveniences (gestures, layout engine/flexbox, accessibility, platform touch affordances, etc.)
+- ⚠️ Widget surface is broad but still lacks higher-level helpers (texture/asset pipelines, gesture abstractions, accessibility hooks)
+- ⚠️ No automated test suite or long-term API stability guarantees yet
+
+Recommended use today: internal tools, rapid ImGui prototyping, or exploring Static Hermes. For customer-facing apps, treat it as a proof-of-concept and budget time to fill in the missing pieces.
+
 ## What is Static Hermes?
 
 [Hermes](https://github.com/facebook/hermes) is a compact (~3MB) JavaScript engine designed for mobile and embedded environments. Unlike traditional JavaScript engines that rely heavily on JIT compilation, Hermes focuses on ahead-of-time (AOT) compilation to bytecode, enabling extremely fast startup times and low memory footprint—ideal for resource-constrained devices.
@@ -418,6 +440,8 @@ That's it! The build system automatically:
 These components map directly to **native Dear ImGui widgets**—not web-style HTML/CSS elements or React Native primitives. Each component calls Dear ImGui's C API through zero-cost FFI, giving you the full power and flexibility of ImGui.
 
 **This is a demo project**, so only a representative subset of ImGui's widgets have been implemented. However, adding new components is straightforward—see [Adding New Components](#adding-new-components) below.
+
+> **Component coverage update (Nov 2025):** Virtually every daily-use ImGui primitive now has a React wrapper, including text entry (`<InputText>` / `<InputTextMultiline>`), numeric/slider/drag inputs, combo/list widgets, menus, docking, tooltips/popups, plots, tables, and drawing primitives. `<Image>` and `<ImageButton>` are also exported; you simply need to supply a texture ID from your native code or renderer glue. Convenience APIs for uploading textures (and other media niceties) are the main remaining gap.
 
 All widgets are exported as **PascalCase React components** from the `react-imgui` package (for example `<Window />`, `<Button />`, `<Text />`). Import just the components you need alongside the reconciler helpers:
 
