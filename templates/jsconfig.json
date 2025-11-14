@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "node16",
+    "moduleResolution": "node16",
+    "jsx": "react-jsx",
+    "allowJs": true,
+    "checkJs": true,
+    "baseUrl": ".",
+    "types": [
+      "react",
+      "react-dom",
+      "react-imgui"
+    ]
+  },
+  "include": [
+    "./**/*.js",
+    "./**/*.jsx"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

@@ -9,6 +9,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PACKAGE_ROOT = realpathSync(resolve(__dirname, '..'));
 const RUNTIME_CMAKE_PATH = PACKAGE_ROOT.replace(/\\/g, '/');
+const RUNTIME_PACKAGE_JSON = JSON.parse(readFileSync(join(PACKAGE_ROOT, 'package.json'), 'utf8'));
+const RUNTIME_PACKAGE_NAME = RUNTIME_PACKAGE_JSON.name || 'react-imgui';
+const RUNTIME_PACKAGE_VERSION = RUNTIME_PACKAGE_JSON.version || '1.0.0';
 
 const BUILD_DIRS = {
   Debug: 'cmake-build-debug',
@@ -370,6 +373,7 @@ function createProject(projectName) {
   const indexJs = readFileSync(join(templatesDir, 'index.js'), 'utf8');
   const mainCpp = readFileSync(join(templatesDir, 'main.cpp'), 'utf8');
   const cmakeLists = readFileSync(join(templatesDir, 'CMakeLists.txt'), 'utf8');
+  const jsconfig = readFileSync(join(templatesDir, 'jsconfig.json'), 'utf8');
 
   const processedCmake = cmakeLists
     .replace(/PROJECT_NAME/g, projectName)
@@ -377,10 +381,15 @@ function createProject(projectName) {
   const processedCpp = mainCpp.replace(/PROJECT_NAME/g, projectName);
   const processedIndex = indexJs.replace(/__PROJECT_TITLE__/g, toTitleCase(projectName));
 
-  writeFileSync(join(projectPath, 'app.jsx'), appJsx);
+  const menuItemTypedef = "\n/** @typedef {import('react-imgui').MenuItemProps} MenuItemProps */\n";
+  const appJsxWithTypedef = appJsx.includes('MenuItemProps')
+    ? appJsx
+    : appJsx.replace(/from\s+'react-imgui';?/, (match) => `${match}${menuItemTypedef}`);
+  writeFileSync(join(projectPath, 'app.jsx'), appJsxWithTypedef);
   writeFileSync(join(projectPath, 'index.js'), processedIndex);
   writeFileSync(join(projectPath, `${projectName}.cpp`), processedCpp);
   writeFileSync(join(projectPath, 'CMakeLists.txt'), processedCmake);
+  writeFileSync(join(projectPath, 'jsconfig.json'), jsconfig);
   copyFileSync(join(templatesDir, 'icon.png'), join(projectPath, 'icon.png'));
 
   const packageJson = {
@@ -388,8 +397,14 @@ function createProject(projectName) {
     version: '1.0.0',
     type: 'module',
     dependencies: {
+      [RUNTIME_PACKAGE_NAME]: `^${RUNTIME_PACKAGE_VERSION}`,
       react: '18.2.0',
       'react-reconciler': '0.29.0'
+    },
+    devDependencies: {
+      '@types/react': '18.2.66',
+      '@types/react-dom': '18.2.21',
+      typescript: '^5.6.3'
     }
   };
   writeFileSync(join(projectPath, 'package.json'), JSON.stringify(packageJson, null, 2));
