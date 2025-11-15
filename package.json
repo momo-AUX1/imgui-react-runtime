@@ -1,6 +1,6 @@
 {
   "name": "react-imgui",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "React runtime for Dear ImGui powered by Static Hermes",
   "main": "index.js",
   "types": "./lib/react-imgui/index.d.ts",
@@ -14,7 +14,13 @@
     "format": "prettier --write \"app/**/*.js\" \"app/**/*.jsx\"",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": ["react", "imgui", "gui", "hermes", "static-hermes"],
+  "keywords": [
+    "react",
+    "imgui",
+    "gui",
+    "hermes",
+    "static-hermes"
+  ],
   "author": "",
   "license": "MIT",
   "type": "module",
