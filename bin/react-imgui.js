@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// MIT License, Momo-AUX1
 
 import { execSync, spawn } from 'child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync, realpathSync, rmSync } from 'fs';

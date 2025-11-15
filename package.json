@@ -1,9 +1,19 @@
 {
   "name": "react-imgui",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "React runtime for Dear ImGui powered by Static Hermes",
   "main": "index.js",
   "types": "./lib/react-imgui/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/react-imgui/index.d.ts",
+      "default": "./index.js"
+    },
+    "./native": {
+      "types": "./lib/react-imgui/native/index.d.ts",
+      "default": "./lib/react-imgui/native/index.js"
+    }
+  },
   "bin": {
     "react-imgui": "./bin/react-imgui.js"
   },

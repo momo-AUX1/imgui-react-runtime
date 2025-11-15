@@ -6,7 +6,6 @@ A React runtime for [Dear ImGui](https://github.com/ocornut/imgui) powered by [S
 
 This project demonstrates how Static Hermes seamlessly bridges JavaScript and C++ ecosystems—combining React's modern development experience with the performance and directness of [Dear ImGui](https://github.com/ocornut/imgui) and [Sokol](https://github.com/floooh/sokol).
 
-**Key highlights:**
 
 - **Fully native in Release mode** - Zero runtime dependencies, instant startup, single 5.2MB executable
 - **JavaScript-first implementation** - ~2,400 lines of hand-written JS, only ~700 lines of C++ glue code
@@ -449,7 +448,110 @@ All widgets are exported as **PascalCase React components** from the `react-imgu
 ```jsx
 import { Window, Text, Button, Separator } from 'react-imgui';
 ```
-*** End Patch
+
+## React Native Compatibility (experimental)
+
+The optional `react-imgui/native` entry point re-exports a curated subset of React Native-style APIs so basic apps can boot without rewriting every import. You get familiar component names (`View`, `ScrollView`, `TextInput`, `Button`, etc.), a shimmed `Alert`, a minimal `AppRegistry` and hooks like `useWindowDimensions`.
+
+```jsx
+import React, { useState } from 'react';
+import {
+  Alert,
+  Button,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  View,
+  WindowView
+} from 'react-imgui/native';
+
+const styles = StyleSheet.create({
+  title: {
+    color: '#00FF88',
+    fontScale: 1.2
+  },
+  sectionHeading: {
+    color: '#AAAAAA'
+  },
+  textInput: {
+    width: 320
+  },
+  button: {
+    width: 200
+  }
+});
+
+export function App() {
+  const [name, setName] = useState('React ImGui');
+  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [count, setCount] = useState(0);
+
+  return (
+    <WindowView title="RN Compat Demo" defaultWidth={420} defaultHeight={360}>
+      <ScrollView width={380} height={320}>
+        <View>
+          <Text style={styles.title}>React Native-style UI</Text>
+          <Text>These components are aliases exported from react-imgui/native.</Text>
+
+          <Text style={styles.sectionHeading}>Settings</Text>
+          <View>
+            <Text>Name</Text>
+            <TextInput
+              value={name}
+              onChangeText={setName}
+              placeholder="Enter your name"
+              style={styles.textInput}
+            />
+          </View>
+
+          <View>
+            <Text>Notifications</Text>
+            <Switch
+              value={notificationsEnabled}
+              onValueChange={setNotificationsEnabled}
+            />
+          </View>
+
+          <Text style={styles.sectionHeading}>Actions</Text>
+          <Button
+            style={styles.button}
+            title="Show Alert"
+            onPress={() => Alert.alert('Hi there!', `Hello ${name}!`)}
+          />
+          <Button
+            style={styles.button}
+            title="Increase Counter"
+            onPress={() => setCount((current) => current + 1)}
+          />
+          <Text>Button pressed {count} times.</Text>
+          <Text>
+            Notifications are {notificationsEnabled ? 'enabled' : 'disabled'}.
+          </Text>
+        </View>
+      </ScrollView>
+    </WindowView>
+  );
+}
+```
+
+### Included aliases
+
+| React Native API | ImGui primitive | Notes |
+| --- | --- | --- |
+| `View`, `SafeAreaView` | `Group` | Immediate layout only (no Flexbox engine) |
+| `WindowView` | `Window` | Convenient for top-level screens |
+| `ScrollView` | `ChildWindow` | `scrollEnabled` toggles ImGui scrollbars |
+| `Text` | `Text` | `numberOfLines` is advisory |
+| `Button`, `Pressable`, `TouchableOpacity`/`Highlight`/`WithoutFeedback` | `Button` | `onPress` mapped to `onClick`; render-prop children receive `{ pressed: false }` |
+| `TextInput` | `InputText` / `InputTextMultiline` | `multiline` + `numberOfLines` choose the widget |
+| `Switch` | `Checkbox` | `value` / `defaultValue` / `onValueChange` supported |
+| `Slider` | `SliderFloat` | `minimumValue` / `maximumValue` → `min` / `max` |
+| `Modal` | `PopupModal` | Controlled with `visible` + `onRequestClose` |
+| `Alert` | Shim | Uses `globalThis.__reactImguiNativeAlert` when present, else logs + fires first button |
+
+`AppRegistry` mirrors the usual `registerComponent` / `runApplication` workflow: calling `runApplication` creates (or reuses) a `createRoot()` container, wires up `globalThis.reactApp.render`, and caches props so ImGui input callbacks can schedule rerenders. The shim is intentionally thin—there's still no Flexbox layout engine, gesture responder system, or native-module stack—so treat it as a migration bridge for simple UI trees rather than a drop-in replacement for the full React Native runtime.
 
 ### Container Components
 
