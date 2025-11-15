@@ -48,6 +48,7 @@ _**Note**: This project is an independent experiment and is not affiliated with,
   - [Table Components](#table-components)
   - [Drawing Primitives](#drawing-primitives)
   - [Adding New Components](#adding-new-components)
+  - [Creating Custom Widgets](#creating-custom-widgets)
 - [Architecture](#architecture)
   - [Three-Unit Architecture](#three-unit-architecture)
   - [Component Overview](#component-overview)
@@ -859,6 +860,62 @@ const [enabled, setEnabled] = useState(false);
 
 The FFI layer provides access to the entire Dear ImGui API, so you can expose any widget you need!
 
+### Creating Custom Widgets
+
+While you can compose existing React components together, Dear ImGui's real power lies in creating fully custom widgets using its immediate-mode drawing API. The [`examples/custom-widget/`](examples/custom-widget/) directory demonstrates this with an interactive radial menu.
+
+![Custom Widget Screenshot](media/custom-widget.jpg)
+
+**How custom widgets work:**
+
+1. **Add a render function** in [`lib/imgui-unit/renderer.js`](lib/imgui-unit/renderer.js) that uses ImGui's draw list API
+2. **Add a case** to the switch statement in [`renderNode()`](https://github.com/tmikov/imgui-react-runtime/blob/93dc8bc8218bacdffa35b59ac2ca6b103a7892ed/lib/imgui-unit/renderer.js#L785)
+3. **Use `_igDummy()`** to reserve layout space for your custom drawing
+4. **Handle mouse interaction** using `_igGetMousePos()` and `_igIsMouseClicked_Bool()`
+
+**Example: RadialMenu** ([`lib/imgui-unit/renderer.js:607-752`](https://github.com/tmikov/imgui-react-runtime/blob/93dc8bc8218bacdffa35b59ac2ca6b103a7892ed/lib/imgui-unit/renderer.js#L603-L761)
+
+```javascript
+function renderRadialMenu(node: any, vec2: c_ptr): void {
+  const drawList = _igGetWindowDrawList();
+
+  // Get cursor position and calculate drawing coordinates
+  _igGetCursorScreenPos(vec2);
+  const centerX = +get_ImVec2_x(vec2) + radius;
+  const centerY = +get_ImVec2_y(vec2) + radius;
+
+  ...
+
+  // Draw filled sectors using path API
+  _ImDrawList_PathClear(drawList);
+  _ImDrawList_PathLineTo(drawList, centerPtr);
+  _ImDrawList_PathArcTo(drawList, centerPtr, radius, angleStart, angleEnd, 32);
+  _ImDrawList_PathFillConvex(drawList, color);
+
+  ...
+
+  // Reserve space in layout
+  set_ImVec2_x(vec2, radius * 2);
+  set_ImVec2_y(vec2, radius * 2);
+  _igDummy(vec2);
+}
+```
+
+**Key ImGui drawing functions:**
+
+- `_ImDrawList_AddLine()`, `_ImDrawList_AddCircle()`, `_ImDrawList_AddRect()` - Basic shapes
+- `_ImDrawList_PathArcTo()`, `_ImDrawList_PathFillConvex()` - Complex paths
+- `_ImDrawList_AddText_Vec2()` - Text at specific positions
+- `_igCalcTextSize()` - Measure text for centering
+- `_igGetMousePos()`, `_igIsMouseClicked_Bool()` - Mouse interaction
+
+**See the full implementation:**
+
+- Code: [`lib/imgui-unit/renderer.js`](lib/imgui-unit/renderer.js) (`renderRadialMenu()`)
+- Usage: [`examples/custom-widget/app.jsx`](examples/custom-widget/app.jsx)
+
+This pattern works for any custom widget - graphs, charts, dials, custom controls, visualizations, etc. The draw list API gives you complete control over rendering while ImGui handles the window system and input.
+
 ## Architecture
 
 ### Three-Unit Architecture
@@ -1124,7 +1181,14 @@ Hermes is **automatically** cloned and built as part of the CMake configurationâ
   ```bash
   cmake -B build -DHERMES_GIT_TAG=abc123def
   ```
-- **Always Release mode**: Hermes always builds in Release for optimal performance
+- **Build type**: Set via `HERMES_BUILD_TYPE` (default: Release)
+  ```bash
+  # Build Hermes in Debug mode (useful for debugging shermes crashes)
+  cmake -B build -DHERMES_BUILD_TYPE=Debug
+
+  # Or RelWithDebInfo (optimized but with debug symbols)
+  cmake -B build -DHERMES_BUILD_TYPE=RelWithDebInfo
+  ```
 - **Per-config isolation**: Debug and Release builds get separate Hermes clones
 
 ### Building the Project
