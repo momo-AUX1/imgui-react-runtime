@@ -1,6 +1,6 @@
 {
   "name": "react-imgui",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "React runtime for Dear ImGui powered by Static Hermes",
   "main": "index.js",
   "types": "./lib/react-imgui/index.d.ts",
