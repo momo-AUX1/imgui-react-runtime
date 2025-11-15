@@ -61,4 +61,9 @@ include_directories(${HERMES_SRC}/API/jsi)
 
 add_subdirectory(external)
 add_subdirectory(lib)
-add_subdirectory(examples)
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/examples/CMakeLists.txt)
+    add_subdirectory(examples)
+else()
+    message(STATUS "Skipping examples directory")
+endif()
