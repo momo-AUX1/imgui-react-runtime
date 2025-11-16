@@ -1,6 +1,6 @@
 {
   "name": "react-imgui",
-  "version": "1.0.5",
+  "version": "1.1.0",
   "description": "React runtime for Dear ImGui powered by Static Hermes",
   "main": "index.js",
   "types": "./lib/react-imgui/index.d.ts",
@@ -31,9 +31,13 @@
     "hermes",
     "static-hermes"
   ],
-  "author": "",
+  "author": "Momo-AUX1",
   "license": "MIT",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/momo-AUX1/imgui-react-runtime.git"
+  },
   "dependencies": {
     "@babel/core": "^7.28.4",
     "esbuild": "^0.25.11",
