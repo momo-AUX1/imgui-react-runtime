@@ -31,6 +31,7 @@ _**Note**: This project is an independent experiment and is not affiliated with,
   - [Supported Platforms](#supported-platforms)
   - [Build Requirements](#build-requirements)
   - [Quick Start](#quick-start)
+  - [Building with Docker](#building-with-docker)
 - [Examples](#examples)
   - [Hello World](#hello-world)
   - [Showcase](#showcase)
@@ -153,6 +154,40 @@ cmake --build cmake-build-debug
 ```
 
 You should see the showcase window with multiple demos, background decorations, and interactive controls!
+
+### Building with Docker
+
+Docker images are provided for building on Linux without installing dependencies locally. This is useful for CI, testing on different distributions, or keeping your host system clean.
+
+**Available Dockerfiles:**
+- `Dockerfile.ubuntu2404` - Ubuntu 24.04 LTS with Clang 18
+- `Dockerfile.fedora42` - Fedora 42 with Clang 20
+
+**Build the Docker image (one-time setup):**
+```bash
+docker build -t imgui-ubuntu2404 -f Dockerfile.ubuntu2404 .
+# or
+docker build -t imgui-fedora42 -f Dockerfile.fedora42 .
+```
+
+**Build the project:**
+
+First, run `npm install` on your host machine (only needed once):
+```bash
+npm install
+```
+
+Then build inside Docker, running as your current user so build artifacts are owned by you:
+```bash
+docker run --rm -u $(id -u):$(id -g) -v $(pwd):/work -w /work imgui-ubuntu2404 \
+  bash -c "cmake -B cmake-build-ubuntu -DCMAKE_BUILD_TYPE=Debug -G Ninja \
+    -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ && \
+    cmake --build cmake-build-ubuntu"
+```
+
+The build output will be in `cmake-build-ubuntu/` (or whichever build directory you specify), owned by your user.
+
+**Note:** Running GUI applications from Docker requires additional setup (X11 forwarding), but building works out of the box.
 
 ## Examples
 

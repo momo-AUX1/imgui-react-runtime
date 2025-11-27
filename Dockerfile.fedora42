@@ -1,0 +1,15 @@
+FROM fedora:42
+
+# Install build dependencies for imgui-react-runtime
+RUN dnf install -y \
+    git \
+    nodejs npm \
+    clang \
+    cmake \
+    ninja-build \
+    libX11-devel \
+    libXi-devel \
+    libXcursor-devel \
+    mesa-libGL-devel \
+    libicu-devel \
+    && dnf clean all
