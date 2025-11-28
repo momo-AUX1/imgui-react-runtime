@@ -17,49 +17,65 @@ export function BouncingBall() {
   const [ballX, setBallX] = useState(200);
   const [ballY, setBallY] = useState(150);
 
-  // Initialize velocity with random angle (use single angle for both components)
-  const speed = 5.0;
-  const angle = Math.random() * 2 * Math.PI;
-
-  const [velocityX, setVelocityX] = useState(Math.cos(angle) * speed);
-  const [velocityY, setVelocityY] = useState(Math.sin(angle) * speed);
-
-  // Update ball position every 16ms (~60fps)
+  // Update ball position every animation frame
   useEffect(() => {
-    const interval = setInterval(() => {
-      setBallX(prevX => {
-        let newX = prevX + velocityX;
+    // Initialize velocity with random angle
+    const speed = 5.0;
+    const angle = Math.random() * 2 * Math.PI;
+    let vx = Math.cos(angle) * speed;
+    let vy = Math.sin(angle) * speed;
+
+    let time = performance.now();
+    let rafId;
+    function render(t) {
+      const dt = (t - time) / 10;
+      time = t;
+
+      setBallX((prevX) => {
+        let newX = prevX + vx * dt;
 
         // Bounce off left/right walls
-        if (newX - ballRadius <= borderThickness || newX + ballRadius >= contentWidth - borderThickness) {
-          setVelocityX(prev => -prev);
+        if (
+          newX - ballRadius <= borderThickness ||
+          newX + ballRadius >= contentWidth - borderThickness
+        ) {
+          vx = -vx;
           // Clamp position to stay within bounds
-          newX = newX - ballRadius <= borderThickness
-            ? borderThickness + ballRadius
-            : contentWidth - borderThickness - ballRadius;
+          newX =
+            newX - ballRadius <= borderThickness
+              ? borderThickness + ballRadius
+              : contentWidth - borderThickness - ballRadius;
         }
 
         return newX;
       });
 
-      setBallY(prevY => {
-        let newY = prevY + velocityY;
+      setBallY((prevY) => {
+        let newY = prevY + vy * dt;
 
         // Bounce off top/bottom walls
-        if (newY - ballRadius <= borderThickness || newY + ballRadius >= contentHeight - borderThickness) {
-          setVelocityY(prev => -prev);
+        if (
+          newY - ballRadius <= borderThickness ||
+          newY + ballRadius >= contentHeight - borderThickness
+        ) {
+          vy = -vy;
           // Clamp position to stay within bounds
-          newY = newY - ballRadius <= borderThickness
-            ? borderThickness + ballRadius
-            : contentHeight - borderThickness - ballRadius;
+          newY =
+            newY - ballRadius <= borderThickness
+              ? borderThickness + ballRadius
+              : contentHeight - borderThickness - ballRadius;
         }
 
         return newY;
       });
-    }, 16);
 
-    return () => clearInterval(interval);
-  }, [velocityX, velocityY]);
+      // Request next frame
+      rafId = requestAnimationFrame(render);
+    }
+
+    rafId = requestAnimationFrame(render);
+    return () => cancelAnimationFrame(rafId);
+  }, []);
 
   return (
     <Window title="Bouncing Ball" defaultX={600} defaultY={350} flags={64}>

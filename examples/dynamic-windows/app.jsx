@@ -7,8 +7,8 @@ import { Window, Text, Separator, Button } from 'react-imgui';
 
 export function App() {
   const [windows, setWindows] = useState([
-    { id: 1, title: "Window 1" },
-    { id: 2, title: "Window 2" },
+    { id: 1, title: 'Window 1' },
+    { id: 2, title: 'Window 2' },
   ]);
   const [nextId, setNextId] = useState(3);
 
@@ -18,7 +18,7 @@ export function App() {
   };
 
   const closeWindow = (windowId) => {
-    setWindows(windows.filter(w => w.id !== windowId));
+    setWindows(windows.filter((w) => w.id !== windowId));
   };
 
   return (
@@ -36,8 +36,8 @@ export function App() {
         <Window
           key={w.id}
           title={w.title}
-          defaultX={100 + (w.id * 30)}
-          defaultY={100 + (w.id * 30)}
+          defaultX={100 + w.id * 30}
+          defaultY={100 + w.id * 30}
           defaultWidth={400}
           defaultHeight={200}
           onClose={() => closeWindow(w.id)}

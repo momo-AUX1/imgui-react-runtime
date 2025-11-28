@@ -20,24 +20,24 @@ export function ControlledWindow() {
     x: 300,
     y: 300,
     width: 350,
-    height: 250
+    height: 250,
   });
 
   const snapToOrigin = () => {
-    setWindowState(prev => ({ ...prev, x: 20, y: 20 }));
+    setWindowState((prev) => ({ ...prev, x: 20, y: 20 }));
   };
 
   const snapToCenter = () => {
     // Approximate screen center
-    setWindowState(prev => ({ ...prev, x: 400, y: 300 }));
+    setWindowState((prev) => ({ ...prev, x: 400, y: 300 }));
   };
 
   const makeWide = () => {
-    setWindowState(prev => ({ ...prev, width: 600, height: 250 }));
+    setWindowState((prev) => ({ ...prev, width: 600, height: 250 }));
   };
 
   const makeTall = () => {
-    setWindowState(prev => ({ ...prev, width: 350, height: 400 }));
+    setWindowState((prev) => ({ ...prev, width: 350, height: 400 }));
   };
 
   return (

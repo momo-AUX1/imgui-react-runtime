@@ -16,13 +16,46 @@ import {
 
 // City names for the stock table
 const CITIES = [
-  "Tokyo", "Delhi", "Shanghai", "Sao Paulo", "Mumbai", "Mexico City",
-  "Beijing", "Osaka", "Cairo", "New York", "Dhaka", "Karachi",
-  "Buenos Aires", "Kolkata", "Istanbul", "Rio de Janeiro", "Manila",
-  "Tianjin", "Kinshasa", "Lahore", "Jakarta", "Seoul", "Wenzhou",
-  "Shenzhen", "Chengdu", "Lima", "Bangkok", "London", "Hong Kong",
-  "Chongqing", "Hangzhou", "Ho Chi Minh City", "Ahmedabad", "Kuala Lumpur",
-  "Pune", "Riyadh", "Miami", "Santiago", "Alexandria", "Saint Petersburg"
+  'Tokyo',
+  'Delhi',
+  'Shanghai',
+  'Sao Paulo',
+  'Mumbai',
+  'Mexico City',
+  'Beijing',
+  'Osaka',
+  'Cairo',
+  'New York',
+  'Dhaka',
+  'Karachi',
+  'Buenos Aires',
+  'Kolkata',
+  'Istanbul',
+  'Rio de Janeiro',
+  'Manila',
+  'Tianjin',
+  'Kinshasa',
+  'Lahore',
+  'Jakarta',
+  'Seoul',
+  'Wenzhou',
+  'Shenzhen',
+  'Chengdu',
+  'Lima',
+  'Bangkok',
+  'London',
+  'Hong Kong',
+  'Chongqing',
+  'Hangzhou',
+  'Ho Chi Minh City',
+  'Ahmedabad',
+  'Kuala Lumpur',
+  'Pune',
+  'Riyadh',
+  'Miami',
+  'Santiago',
+  'Alexandria',
+  'Saint Petersburg',
 ];
 
 const NUM_ROWS = 40;
@@ -30,9 +63,9 @@ const NUM_COLS = 8;
 
 // Get color based on value
 function getValueColor(value) {
-  if (value < 33.0) return "#FF0000"; // Red
-  if (value < 66.0) return "#00FF00"; // Green
-  return "#FFFFFF"; // White
+  if (value < 33.0) return '#FF0000'; // Red
+  if (value < 66.0) return '#00FF00'; // Green
+  return '#FFFFFF'; // White
 }
 
 export function StockTable() {
@@ -52,7 +85,7 @@ export function StockTable() {
   // Update data every second using setInterval
   useEffect(() => {
     const intervalId = setInterval(() => {
-      setData(prevData => {
+      setData((prevData) => {
         const newData = [];
         for (let i = 0; i < NUM_ROWS; i++) {
           const newRow = [];
