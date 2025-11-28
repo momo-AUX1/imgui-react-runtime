@@ -109,6 +109,9 @@ You'll need:
 - **Node.js and npm** (Node 20 or later recommended) - For esbuild bundler and React dependencies
   - macOS: `brew install node` or download from [nodejs.org](https://nodejs.org/)
   - Linux: `snap install node --classic` (recommended) or `apt-get install nodejs npm`
+- **Git** - For cloning Hermes during CMake configure
+  - macOS: Included with Xcode Command Line Tools
+  - Linux: `apt-get install git` or `yum install git`
 - **C++ Compiler**
   - **Clang** (recommended) - Officially supported by Static Hermes
   - GCC also works but Clang is the tested configuration
